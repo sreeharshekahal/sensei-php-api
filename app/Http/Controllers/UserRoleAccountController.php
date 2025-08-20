@@ -47,7 +47,7 @@ class UserRoleAccountController extends Controller
                 'date_joined'  => now(),
             ]);
 
-            
+
 
             // 3️⃣ Create UserRoleAccount
             $ura = UserRoleAccount::create([
@@ -58,12 +58,14 @@ class UserRoleAccountController extends Controller
             ]);
 
             // 4️⃣ Assign Groups if provided
-            // if ($request->has('groups') && is_array($request->groups)) {
-            //     foreach ($request->groups as $groupId) {
-            //         $group = Group::findOrFail($groupId);
-            //         $group->users()->attach($user->id); // ensure pivot uses user_id
-            //     }
-            // }
+            if ($request->has('groups') && is_array($request->groups)) {
+                foreach ($request->groups as $groupId) {
+                    DB::table('access_group_users')->insert([
+                        'userroleaccount_id'  => $ura->id,   // newly created user id
+                        'group_id' => $groupId,
+                    ]);
+                }
+            }
 
             DB::commit();
             return response()->json([ 'user_role_account' => $ura, 'password' => $plainPassword, // send generated password
