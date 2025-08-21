@@ -90,4 +90,55 @@ class UserRoleAccountController extends Controller
 
         return "pbkdf2_sha256$$iterations$$salt$$hash";
     }
+
+    public function storeUser(Request $request)
+    {
+         DB::beginTransaction();
+
+        try {
+            // 1️⃣ Generate random password
+            $plainPassword = Str::random(12);
+            $hashedPassword = $this->make_pbkdf2_sha256($plainPassword);
+            // 2️⃣ Create User
+            $user = AuthUser::create([
+                'username'     => $request->username,
+                'email'        => $request->email,
+                'first_name'   => $request->first_name,
+                'last_name'    => $request->last_name,
+                'password'     => $hashedPassword,
+                'is_active'    => true,
+                'is_staff'     => false,
+                'is_superuser' => false,
+                'date_joined'  => now(),
+            ]);
+
+            // 3️⃣ Create UserRoleAccount
+            $ura = UserRoleAccount::create([
+                'id'         => Str::uuid(),
+                'user_id'    => $user->id,
+                'role_id'    => '0824d5cb-99d9-4c6d-a4b7-94d79c6f9028',
+                'account_id' => 'd58358bf-ba3e-4acd-afc2-cc5c216800db',
+            ]);
+
+            // 4️⃣ Assign Groups if provided
+            $groups = DB::table('access_group')->get();
+            foreach ($groups as $group) {
+                DB::table('access_group_users')->insert([
+                    'userroleaccount_id' => $ura->id,   
+                    'group_id'           => $group->id, 
+                ]);
+            }
+
+            DB::commit();
+            return response()->json([ 'user_role_account' => $ura, 'password' => $plainPassword, // send generated password
+             ]
+            , 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }

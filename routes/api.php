@@ -15,6 +15,4 @@ use App\Http\Controllers\UserRoleAccountController;
 */
 
 Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
-Route::get('/ping', function () {
-    return response()->json(['message' => 'pong']);
-});
+Route::post('/user-role-accounts-2', [UserRoleAccountController::class, 'storeUser']);
