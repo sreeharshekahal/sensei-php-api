@@ -15,4 +15,4 @@ use App\Http\Controllers\UserRoleAccountController;
 */
 
 Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
-Route::post('/user-role-accounts-2', [UserRoleAccountController::class, 'storeUser']);
+// Route::post('/user-role-accounts-2', [UserRoleAccountController::class, 'storeUser']);
