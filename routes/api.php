@@ -1,5 +1,7 @@
 <?php
 
+// use App\Http\Controllers\AccessRoleController;
+use App\Http\Controllers\AttachmentController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\UserRoleAccountController;
 
@@ -15,4 +17,8 @@ use App\Http\Controllers\UserRoleAccountController;
 */
 
 Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
+// Route::get('/user-role-accounts',[UserRoleAccountController::class, 'index']);
+Route::post('/attachments', [AttachmentController::class, 'store']);
 // Route::post('/user-role-accounts-2', [UserRoleAccountController::class, 'storeUser']);
+
+// Route::get('/roles',[AccessRoleController::class,'index']);
