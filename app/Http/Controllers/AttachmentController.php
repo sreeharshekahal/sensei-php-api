@@ -5,45 +5,51 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Attachment;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+
 
 class AttachmentController extends Controller
 {
     public function store(Request $request)
     {
-        // Validate: ensure at least one file is uploaded
-        $request->validate([
-            'path.*' => 'required|file', // 'path' is an array of files
-        ]);
+        // Validate: ensure one file is uploaded
+         $validator = Validator::make($request->all(), [
+        'path' => 'required|file|mimetypes:image/*,audio/*,video/*',
+    ]);
 
-        $attachments = [];
-
-        // Loop through all uploaded files
-        $files = $request->file('path');
-        foreach ($files as $file) {
-
-            $folder = 'global/images/' . date('Y/m/d');
-
-            // Generate unique filename
-            $filename = Str::uuid() . '-attach_' . Str::random(8) . '.' . $file->getClientOriginalExtension();
-
-            // Store the file
-            $path = $file->storeAs($folder, $filename, 'public');
-
-            // Create attachment record
-            $attachment = new Attachment();
-            $attachment->path = $path;                  // Stored path
-            $attachment->name = basename($path);       // Just the filename
-            $attachment->attachment_type = 'global';
-            $attachment->setFileMetadata($file);       // Fill type, size, hash
-            $attachment->save();
-
-            $response[] = [
-                'name' => $attachment->name,
-                'type' => $attachment->file_type,
-                'uri'  => url('storage/' . $attachment->path),
-            ];
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+            ], 422);
         }
-        // Return all saved attachments
-        return response()->json($response, 201);
+
+        $file = $request->file('path');
+
+        // Define folder path (you can change 'global/images' if needed)
+        $folder = 'global/uploads/' . date('Y/m/d');
+
+        // Generate unique filename
+        $filename = Str::uuid() . '-attach_' . Str::random(8) . '.' . $file->getClientOriginalExtension();
+
+        // Store the file in 'public' disk
+        $path = $file->storeAs($folder, $filename, 'public');
+
+        // Save attachment in DB
+        $attachment = new Attachment();
+        $attachment->path = $path;
+        $attachment->name = basename($path);
+        $attachment->attachment_type = 'global';
+        $attachment->setFileMetadata($file); // your custom function
+        $attachment->save();
+
+        // Return single response
+        return response()->json([
+            'id'   => $attachment->id,
+            'name' => $attachment->name,
+            'type' => $attachment->file_type,
+            'path' => asset($attachment->path),
+        ], 201);
     }
 }
