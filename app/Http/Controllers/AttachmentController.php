@@ -13,10 +13,11 @@ class AttachmentController extends Controller
 {
     public function store(Request $request)
     {
-        // Validate: ensure one file is uploaded
-         $validator = Validator::make($request->all(), [
-        'path' => 'required|file|mimetypes:image/*,audio/*,video/*',
-    ]);
+
+        // 1️⃣ Validate file
+        $validator = Validator::make($request->all(), [
+            'path' => 'required|file|mimetypes:image/*,audio/*,video/*',
+        ]);
 
         if ($validator->fails()) {
             return response()->json([
@@ -26,30 +27,40 @@ class AttachmentController extends Controller
         }
 
         $file = $request->file('path');
-
-        // Define folder path (you can change 'global/images' if needed)
         $folder = 'global/uploads/' . date('Y/m/d');
+        $extension = $file->getClientOriginalExtension() ?: $file->extension();
+        $filename = Str::uuid() . '-attach_' . Str::random(8) . '.' . $extension;
 
-        // Generate unique filename
-        $filename = Str::uuid() . '-attach_' . Str::random(8) . '.' . $file->getClientOriginalExtension();
+        try {
+            // 4️⃣ Upload to S3
+            $path = Storage::disk('s3')->putFileAs($folder, $file, $filename);
 
-        // Store the file in 'public' disk
-        $path = $file->storeAs($folder, $filename, 'public');
+            if (!$path) {
+                return response()->json(['success' => false, 'message' => 'Failed to upload file to S3'], 500);
+            }
 
-        // Save attachment in DB
-        $attachment = new Attachment();
-        $attachment->path = $path;
-        $attachment->name = basename($path);
-        $attachment->attachment_type = 'global';
-        $attachment->setFileMetadata($file); // your custom function
-        $attachment->save();
+            // 5️⃣ Save in DB
+            $attachment = new Attachment();
+            $attachment->path = $path; // This is S3 key
+            $attachment->name = $filename;
+            $attachment->attachment_type = 'global';
+            $attachment->setFileMetadata($file);
+            $attachment->save();
 
-        // Return single response
-        return response()->json([
-            'id'   => $attachment->id,
-            'name' => $attachment->name,
-            'type' => $attachment->file_type,
-            'path' => asset($attachment->path),
-        ], 201);
+            // 6️⃣ Return response
+            return response()->json([
+                'id'   => $attachment->id,
+                'name' => $attachment->name,
+                'type' => $attachment->file_type,
+                'path' => Storage::disk('s3')->url($path), // full URL
+            ], 201);
+
+        } catch (\Exception $e) {
+            // Catch AWS SDK errors
+            return response()->json([
+                'success' => false,
+                'message' => 'S3 upload failed: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

@@ -16,11 +16,18 @@ class Attachment extends Model
     const CREATED_AT = 'created';
     const UPDATED_AT = 'updated';
 
-    public function setFileMetadata($file)
+   public function setFileMetadata($file)
     {
-        $this->file_type = $file->getClientMimeType();
+        $this->file_type = $file->getMimeType(); // more standard than getClientMimeType()
         $this->size = $file->getSize();
-        $this->hash_value = md5_file($file->getPathname());
+
+        // Only calculate hash if file exists locally
+        if ($file->isValid()) {
+            $this->hash_value = md5_file($file->getPathname());
+        } else {
+            $this->hash_value = null;
+        }
+
         $this->attachment_type = 'global';
     }
 
