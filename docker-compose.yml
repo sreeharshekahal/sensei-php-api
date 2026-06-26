@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sensei-app
+    ports:
+      - "8000:80"
+    volumes:
+      - .:/var/www/html
+      # - ./staging.env:/var/www/html/.env
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"

@@ -1,0 +1,483 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\AuthUser;
+use App\Models\UserRoleAccount;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+
+class UserRoleAccountController extends Controller
+{
+    /**
+     * Create a new user role account with profile and groups from a nested payload
+     */
+    public function store(Request $request)
+    {
+        // 1️⃣ Validate your exact 100% required nested JSON payload structure
+        $request->validate([
+            'role_id' => 'required|uuid|exists:access_role,id',
+            'groups' => 'required|array',
+            'groups.*' => 'uuid|exists:access_group,id',
+            'profile.designation' => 'nullable|string|max:255',
+            'profile.avatar_id' => 'nullable|uuid',
+            'profile.user.email' => 'required|email|max:254|unique:auth_user,email',
+            'profile.user.first_name' => 'required|string|max:150',
+            'profile.user.last_name' => 'required|string|max:150',
+            'profile.user.username' => 'required|string|max:150|unique:auth_user,username',
+            'profile.user.password' => 'required|string|min:6',
+        ]);
+
+        // Unpack nested payload segments for safe array matching
+        $profileData = $request->input('profile', []);
+        $userData = $profileData['user'] ?? [];
+
+        DB::beginTransaction();
+
+        try {
+            // 2️⃣ Hash password using your custom Django-compatible algorithm
+            $plainPassword = $userData['password'];
+            $hashedPassword = $this->make_pbkdf2_sha256($plainPassword);
+
+            // 3️⃣ Create Core User inside 'auth_user'
+            $user = AuthUser::create([
+                'username'     => $userData['username'],
+                'email'        => $userData['email'],
+                'first_name'   => $userData['first_name'],
+                'last_name'    => $userData['last_name'],
+                'password'     => $hashedPassword,
+                'is_active'    => true,
+                'is_staff'     => false,
+                'is_superuser' => false,
+                'date_joined'  => now(),
+            ]);
+
+            // 4️⃣ Create Django profile connection row (mapping into common_profile table)
+            DB::table('common_profile')->insert([
+                'id'          => Str::uuid()->toString(),
+                'user_id'     => $user->id,
+                'phone'       => '', // Default fallback required by table structure layout
+                'designation' => $profileData['designation'] ?? null,
+                'avatar_id'   => $profileData['avatar_id'] ?? null,
+                'created'     => now(),
+                'updated'     => now(),
+            ]);
+
+            // 5️⃣ Automatically fetch account_id linked with the provided role_id
+            $associatedRole = DB::table('access_role')->where('id', $request->role_id)->first();
+            if (!$associatedRole) {
+                throw new \Exception("The selected access role context was not found.");
+            }
+
+            // 6️⃣ Build UserRoleAccount intersection record 
+            // Note: Explicit 'id' mapping removed here since your Model uses the HasUuids trait!
+            $ura = UserRoleAccount::create([
+                'user_id'    => $user->id,
+                'role_id'    => $request->role_id,
+                'account_id' => $associatedRole->account_id,
+            ]);
+
+            // 7️⃣ Bind userroleaccount record context to multiple groups
+            if (!empty($request->groups)) {
+                foreach ($request->groups as $groupId) {
+                    DB::table('access_group_users')->insert([
+                        'userroleaccount_id' => $ura->id, // Accurately captures the auto-generated model UUID
+                        'group_id'           => $groupId,
+                    ]);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message'           => 'User account with groups and profile synced successfully.',
+                'user_role_account' => $ura,
+                'password'          => $plainPassword
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 500);
+        }   
+    }
+
+    /**
+     * Custom Django-compatible PBKDF2-SHA256 hash
+     */
+    private function make_pbkdf2_sha256($password, $iterations = 36000, $length = 32)
+    {
+        $salt = base64_encode(random_bytes(12));
+        $hash = base64_encode(hash_pbkdf2('sha256', $password, $salt, $iterations, $length, true));
+
+        return "pbkdf2_sha256$$iterations$$salt$$hash";
+    }
+
+    /**
+     * Delete a user along with all associated profiles, roles, observations, tokens, and group mappings
+     */
+    public function destroy($id)
+    {
+        // 1️⃣ Validate that the user exists in auth_user
+        $userExists = DB::table('auth_user')->where('id', $id)->exists();
+        
+        if (!$userExists) {
+            return response()->json([
+                'error' => 'User account not found.'
+            ], 404);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            // 2️⃣ Find all UserRoleAccount IDs linked to this user
+            $uraIds = DB::table('access_userroleaccount')
+                ->where('user_id', $id)
+                ->pluck('id')
+                ->toArray();
+
+            if (!empty($uraIds)) {
+                // 3️⃣ Find all observations where this user is either the observer or observee
+                $observationIds = DB::table('observations_observation')
+                    ->whereIn('observee_id', $uraIds)
+                    ->orWhereIn('observer_id', $uraIds)
+                    ->pluck('id')
+                    ->toArray();
+
+                if (!empty($observationIds)) {
+                    // a. Find related evidence blocks linked to these observations
+                    $evidenceIds = DB::table('observations_evidence')
+                        ->whereIn('observation_id', $observationIds)
+                        ->pluck('id')
+                        ->toArray();
+
+                    if (!empty($evidenceIds)) {
+                        // b. Clear lowest-level indicator ratings first
+                        DB::table('observations_indicatorrating')
+                            ->whereIn('evidence_id', $evidenceIds)
+                            ->delete();
+
+                        // c. Clear evidence attachment pivot relationships
+                        DB::table('observations_evidence_attachments')
+                            ->whereIn('evidence_id', $evidenceIds)
+                            ->delete();
+
+                        // d. Clear the evidence records
+                        DB::table('observations_evidence')
+                            ->whereIn('id', $evidenceIds)
+                            ->delete();
+                    }
+
+                    // e. Finally, delete the parent observation tracking entries safely
+                    DB::table('observations_observation')
+                        ->whereIn('id', $observationIds)
+                        ->delete();
+                }
+
+                // 4️⃣ Delete group associations
+                DB::table('access_group_users')
+                    ->whereIn('userroleaccount_id', $uraIds)
+                    ->delete();
+            }
+
+            // 5️⃣ Delete from access_userroleaccount
+            DB::table('access_userroleaccount')
+                ->where('user_id', $id)
+                ->delete();
+
+            // 6️⃣ Delete from common_profile
+            DB::table('common_profile')
+                ->where('user_id', $id)
+                ->delete();
+
+            // 7️⃣ Clear active API login tokens (Fixes the new authtoken_token constraint violation)
+            DB::table('authtoken_token')
+                ->where('user_id', $id)
+                ->delete();
+
+            // 8️⃣ Delete core user record from auth_user
+            DB::table('auth_user')
+                ->where('id', $id)
+                ->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'User account and all deep relational token structures deleted successfully.',
+                'deleted_user_id' => (int)$id
+            ], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'error' => 'Failed to delete user safely.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Display a listing of user role accounts with detailed profile and role information
+     */
+    public function index(Request $request)
+    {
+        try {
+            // Optional pagination: default to 15 items per page
+            $perPage = $request->query('per_page', 15);
+
+            // Fetch records using explicit joins across table dependencies
+            $accounts = DB::table('access_userroleaccount as ura')
+               ->join('auth_user as u', 'ura.user_id', '=', 'u.id') //  Fixed! wrapped in string quotes
+                ->leftJoin('common_profile as p', 'p.user_id', '=', 'u.id')
+                ->join('access_role as r', 'ura.role_id', '=', 'r.id')
+                ->select([
+                    'ura.id as user_role_account_id',
+                    'ura.account_id',
+                    'u.id as user_id',
+                    'u.username',
+                    'u.email',
+                    'u.first_name',
+                    'u.last_name',
+                    'u.is_active',
+                    'p.designation',
+                    'p.avatar_id',
+                    'r.id as role_id',
+                    'r.title as role_title',
+                    'r.rank as role_rank'
+                ])
+                ->orderBy('u.date_joined', 'desc')
+                ->paginate($perPage);
+
+            // Restructure the collection dynamically to match a clean JSON API pattern
+            $transformedData = collect($accounts->items())->map(function ($item) {
+                return [
+                    'user_role_account_id' => $item->user_role_account_id,
+                    'account_id'           => $item->account_id,
+                    'role_id'              => $item->role_id,
+                    'role_title'           => $item->role_title,
+                    'role_rank'            => $item->role_rank,
+                    'profile' => [
+                        'avatar_id'   => $item->avatar_id,
+                        'designation' => $item->designation,
+                        'user' => [
+                            'id'         => $item->user_id,
+                            'username'   => $item->username,
+                            'email'      => $item->email,
+                            'first_name' => $item->first_name,
+                            'last_name'  => $item->last_name,
+                            'is_active'  => (bool)$item->is_active,
+                        ]
+                    ]
+                ];
+            });
+
+            return response()->json([
+                'data' => $transformedData,
+                'meta' => [
+                    'current_page' => $accounts->currentPage(),
+                    'last_page'    => $accounts->lastPage(),
+                    'per_page'     => $accounts->perPage(),
+                    'total'        => $accounts->total(),
+                ]
+            ], 200);
+
+        } catch (\Exception $e) { // Brackets are completely synced here now
+            return response()->json([
+                'error'   => 'Failed to retrieve user role accounts.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Display the specified user role account detail with profile, role, and groups
+     * (Supports both User ID integer and Role Account UUID lookups)
+     */
+    public function show($id)
+    {
+        try {
+            // 1️⃣ Fetch the core record with explicit joins
+            $query = DB::table('access_userroleaccount as ura')
+                ->join('auth_user as u', 'ura.user_id', '=', 'u.id')
+                ->leftJoin('common_profile as p', 'p.user_id', '=', 'u.id')
+                ->join('access_role as r', 'ura.role_id', '=', 'r.id')
+                ->select([
+                    'ura.id as user_role_account_id',
+                    'ura.account_id',
+                    'u.id as user_id',
+                    'u.username',
+                    'u.email',
+                    'u.first_name',
+                    'u.last_name',
+                    'u.is_active',
+                    'p.designation',
+                    'p.avatar_id',
+                    'p.phone',
+                    'r.id as role_id',
+                    'r.title as role_title',
+                    'r.rank as role_rank'
+                ]);
+
+            // Dynamically check if the incoming parameter is a numeric user ID or UUID string
+            if (is_numeric($id)) {
+                $query->where('u.id', $id);
+            } else {
+                $query->where('ura.id', $id);
+            }
+
+            $account = $query->first();
+
+            // 2️⃣ Return 404 if the record doesn't exist
+            if (!$account) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User role account record not found.'
+                ], 404);
+            }
+
+            // 3️⃣ Fetch the associated group UUIDs for this specific account
+            $groups = DB::table('access_group_users')
+                ->where('userroleaccount_id', $account->user_role_account_id)
+                ->pluck('group_id')
+                ->toArray();
+
+            // Map out the exact required nested JSON structure
+            $transformedData = [
+                'user_role_account_id' => $account->user_role_account_id,
+                'account_id'           => $account->account_id,
+                'role_id'              => $account->role_id,
+                'role_title'           => $account->role_title,
+                'role_rank'            => $account->role_rank,
+                'groups'               => $groups,
+                'profile' => [
+                    'avatar_id'   => $account->avatar_id,
+                    'designation' => $account->designation,
+                    'phone'       => $account->phone,
+                    'user' => [
+                        'id'         => $account->user_id,
+                        'username'   => $account->username,
+                        'email'      => $account->email,
+                        'first_name' => $account->first_name,
+                        'last_name'  => $account->last_name,
+                        'is_active'  => (bool)$account->is_active,
+                    ]
+                ]
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data'    => $transformedData
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve user role account details.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update an existing user role account by auth_user integer ID
+     */
+    public function update(Request $request, $id)
+    {
+        // 1️⃣ Automatically strip the outer "data" key layer if present in input payloads
+        if ($request->has('data')) {
+            $request->merge($request->input('data'));
+        }
+
+        // 2️⃣ Find the UserRoleAccount context matching the auth_user integer ID
+        $ura = UserRoleAccount::where('user_id', $id)->first();
+        
+        if (!$ura) {
+            return response()->json([
+                'success' => false,
+                'message' => "User role account record not found for the given User ID: {$id}."
+            ], 404);
+        }
+
+        // 3️⃣ Run input validation checks (exempting this user's current record)
+        $request->validate([
+            'role_id' => 'required|uuid|exists:access_role,id',
+            'groups' => 'required|array',
+            'groups.*' => 'uuid|exists:access_group,id',
+            'profile.designation' => 'nullable|string|max:255',
+            'profile.avatar_id' => 'nullable|uuid',
+            'profile.phone' => 'nullable|string|max:50',
+            'profile.user.email' => 'required|email|max:254|unique:auth_user,email,' . $id,
+            'profile.user.username' => 'required|string|max:150|unique:auth_user,username,' . $id,
+            'profile.user.first_name' => 'required|string|max:150',
+            'profile.user.last_name' => 'required|string|max:150',
+            'profile.user.password' => 'nullable|string|min:6',
+        ]);
+
+        $profileData = $request->input('profile', []);
+        $userData = $profileData['user'] ?? [];
+
+        DB::beginTransaction();
+
+        try {
+            // 4️⃣ Update Core User Identity rows inside 'auth_user'
+            $userUpdateData = [
+                'username'   => $userData['username'],
+                'email'      => $userData['email'],
+                'first_name' => $userData['first_name'],
+                'last_name'  => $userData['last_name'],
+            ];
+
+            if (!empty($userData['password'])) {
+                $userUpdateData['password'] = $this->make_pbkdf2_sha256($userData['password']);
+            }
+
+            DB::table('auth_user')->where('id', $id)->update($userUpdateData);
+
+            // 5️⃣ Update Custom Profile Meta fields inside 'common_profile' (Includes phone)
+            DB::table('common_profile')->where('user_id', $id)->update([
+                'designation' => $profileData['designation'] ?? null,
+                'avatar_id'   => $profileData['avatar_id'] ?? null,
+                'phone'       => $profileData['phone'] ?? '',
+                'updated'     => now(),
+            ]);
+
+            // 6️⃣ Re-verify and update current Access Role contextual link
+            $associatedRole = DB::table('access_role')->where('id', $request->role_id)->first();
+            if (!$associatedRole) {
+                throw new \Exception("The selected access role context was not found.");
+            }
+
+            $ura->update([
+                'role_id'    => $request->role_id,
+                'account_id' => $associatedRole->account_id,
+            ]);
+
+            // 7️⃣ Sync Group permissions mappings pivots
+            DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
+            
+            if (!empty($request->groups)) {
+                foreach ($request->groups as $groupId) {
+                    DB::table('access_group_users')->insert([
+                        'userroleaccount_id' => $ura->id,
+                        'group_id'           => $groupId,
+                    ]);
+                }
+            }
+
+            DB::commit();
+
+            // 8️⃣ Safely pass the user ID integer context to get pure structural JSON returned
+            return $this->show($id);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update user account safely.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+} 
