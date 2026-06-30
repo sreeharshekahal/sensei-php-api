@@ -1,0 +1,297 @@
+{
+    "info": {
+        "name": "API",
+        "description": "",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Laravel APIs ",
+            "description": "",
+            "item": [
+                {
+                    "name": "Create Auser Account",
+                    "description": "",
+                    "event": [],
+                    "auth": {},
+                    "request": {
+                        "auth": {},
+                        "method": "POST",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\r\n  \"groups\": [\"d02958c8-d747-4096-8372-6fbfb2e7ec00\"],\r\n  \"profile\": {\r\n    \"avatar_id\": null,\r\n    \"designation\": \"Software Engineer\",\r\n    \"user\": {\r\n      \"email\": \"code.aroma@gmail.com\",\r\n      \"first_name\": \"Code\",\r\n      \"last_name\": \"Aroma\",\r\n      \"password\": \"123456\",\r\n      \"username\": \"code.aroma\"\r\n    }\r\n  },\r\n  \"role_id\": \"94637b11-f764-49a1-b801-3e9122c49093\"\r\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json",
+                                "description": "",
+                                "type": "string"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "description": "",
+                                "type": "string"
+                            }
+                        ],
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/user-role-accounts",
+                            "path": [
+                                "api",
+                                "user-role-accounts"
+                            ],
+                            "host": [
+                                "127",
+                                "0",
+                                "0",
+                                "1"
+                            ],
+                            "protocol": "http",
+                            "port": "8000",
+                            "query": [],
+                            "variable": []
+                        }
+                    },
+                    "response": [],
+                    "protocolProfileBehavior": {
+                        "strictSSL": false,
+                        "followRedirects": true
+                    }
+                },
+                {
+                    "name": "Delete User",
+                    "description": "",
+                    "event": [],
+                    "auth": {},
+                    "request": {
+                        "auth": {},
+                        "method": "DELETE",
+                        "body": {},
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json",
+                                "description": "",
+                                "type": "string"
+                            }
+                        ],
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/user-role-accounts/157",
+                            "path": [
+                                "api",
+                                "user-role-accounts",
+                                "157"
+                            ],
+                            "host": [
+                                "127",
+                                "0",
+                                "0",
+                                "1"
+                            ],
+                            "protocol": "http",
+                            "port": "8000",
+                            "query": [],
+                            "variable": []
+                        }
+                    },
+                    "response": [],
+                    "protocolProfileBehavior": {
+                        "strictSSL": false,
+                        "followRedirects": true
+                    }
+                },
+                {
+                    "name": "User Role Accounts",
+                    "description": "",
+                    "event": [],
+                    "auth": {},
+                    "request": {
+                        "auth": {},
+                        "method": "GET",
+                        "body": {},
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/user-role-accounts",
+                            "path": [
+                                "api",
+                                "user-role-accounts"
+                            ],
+                            "host": [
+                                "127",
+                                "0",
+                                "0",
+                                "1"
+                            ],
+                            "protocol": "http",
+                            "port": "8000",
+                            "query": [],
+                            "variable": []
+                        }
+                    },
+                    "response": [],
+                    "protocolProfileBehavior": {
+                        "strictSSL": false,
+                        "followRedirects": true
+                    }
+                },
+                {
+                    "name": "Get User Role Account Detail",
+                    "description": "",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [],
+                                "type": "text/javascript",
+                                "packages": {}
+                            }
+                        }
+                    ],
+                    "auth": {},
+                    "request": {
+                        "auth": {},
+                        "method": "GET",
+                        "body": {},
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/user-role-accounts/019ef2f7-e152-7392-b970-1b6cee1135c0",
+                            "path": [
+                                "api",
+                                "user-role-accounts",
+                                "019ef2f7-e152-7392-b970-1b6cee1135c0"
+                            ],
+                            "host": [
+                                "127",
+                                "0",
+                                "0",
+                                "1"
+                            ],
+                            "protocol": "http",
+                            "port": "8000",
+                            "query": [],
+                            "variable": []
+                        }
+                    },
+                    "response": [],
+                    "protocolProfileBehavior": {
+                        "strictSSL": false,
+                        "followRedirects": true
+                    }
+                },
+                {
+                    "name": "Update User By ID",
+                    "description": "",
+                    "event": [],
+                    "auth": {},
+                    "request": {
+                        "auth": {},
+                        "method": "PUT",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\r\n    \"role_id\": \"94637b11-f764-49a1-b801-3e9122c49093\",\r\n    \"groups\": [\r\n        \"d02958c8-d747-4096-8372-6fbfb2e7ec00\"\r\n    ],\r\n    \"profile\": {\r\n        \"avatar_id\": null,\r\n        \"designation\": \"Software Engineer\",\r\n        \"phone\": \"9876543210\",\r\n        \"user\": {\r\n            \"username\": \"code.aroma\",\r\n            \"email\": \"code.aroma@gmail.commmmmmm\",\r\n            \"first_name\": \"Code\",\r\n            \"last_name\": \"Aroma\"\r\n        }\r\n    }\r\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json",
+                                "description": "",
+                                "type": "string"
+                            }
+                        ],
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/user-role-accounts/177",
+                            "path": [
+                                "api",
+                                "user-role-accounts",
+                                "177"
+                            ],
+                            "host": [
+                                "127",
+                                "0",
+                                "0",
+                                "1"
+                            ],
+                            "protocol": "http",
+                            "port": "8000",
+                            "query": [],
+                            "variable": []
+                        }
+                    },
+                    "response": [],
+                    "protocolProfileBehavior": {
+                        "strictSSL": false,
+                        "followRedirects": true
+                    }
+                },
+                {
+                    "name": "Get User By ID",
+                    "description": "",
+                    "event": [],
+                    "auth": {},
+                    "request": {
+                        "auth": {},
+                        "method": "GET",
+                        "body": {},
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/user-role-accounts/163",
+                            "path": [
+                                "api",
+                                "user-role-accounts",
+                                "163"
+                            ],
+                            "host": [
+                                "127",
+                                "0",
+                                "0",
+                                "1"
+                            ],
+                            "protocol": "http",
+                            "port": "8000",
+                            "query": [],
+                            "variable": []
+                        }
+                    },
+                    "response": [],
+                    "protocolProfileBehavior": {
+                        "strictSSL": false,
+                        "followRedirects": true
+                    }
+                }
+            ],
+            "event": [
+                {
+                    "listen": "prerequest",
+                    "script": {
+                        "exec": [],
+                        "type": "text/javascript",
+                        "packages": {}
+                    }
+                },
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [],
+                        "type": "text/javascript",
+                        "packages": {}
+                    }
+                }
+            ],
+            "auth": {}
+        }
+    ],
+    "variable": [],
+    "event": [],
+    "auth": {}
+}

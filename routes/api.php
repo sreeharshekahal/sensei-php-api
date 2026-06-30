@@ -15,10 +15,15 @@ use App\Http\Controllers\UserRoleAccountController;
 | is assigned the "api" middleware group. Enjoy building your API!
 |
 */
-
+Route::delete('/user-role-accounts/{id}', [UserRoleAccountController::class, 'destroy']);
+Route::get('/user-role-accounts', [UserRoleAccountController::class, 'index']);
+Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show']);
 Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
-// Route::get('/user-role-accounts',[UserRoleAccountController::class, 'index']);
-Route::post('/attachments', [AttachmentController::class, 'store']);
-// Route::post('/user-role-accounts-2', [UserRoleAccountController::class, 'storeUser']);
+Route::put('/user-role-accounts/{id}', [UserRoleAccountController::class, 'update']);
 
+Route::post('/attachments', [AttachmentController::class, 'store']);
+
+
+// Route::post('/user-role-accounts-2', [UserRoleAccountController::class, 'storeUser']);
+// Route::get('/user-role-accounts',[UserRoleAccountController::class, 'index']);
 // Route::get('/roles',[AccessRoleController::class,'index']);
