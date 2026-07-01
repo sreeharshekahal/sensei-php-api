@@ -22,11 +22,11 @@ class UserRoleAccountController extends Controller
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
-            'profile.user.email' => 'required|email|max:254|unique:auth_user,email',
+            'profile.user.email' => 'nullable|email|max:254|unique:auth_user,email',
             'profile.user.first_name' => 'required|string|max:150',
             'profile.user.last_name' => 'required|string|max:150',
             'profile.user.username' => 'required|string|max:150|unique:auth_user,username',
-            'profile.user.password' => 'required|string|min:6',
+            'profile.user.password' => 'nullable|string|min:6',
         ]);
 
         // Unpack nested payload segments for safe array matching
@@ -70,7 +70,7 @@ class UserRoleAccountController extends Controller
                 throw new \Exception("The selected access role context was not found.");
             }
 
-            // 6️⃣ Build UserRoleAccount intersection record 
+            // 6️⃣ Build UserRoleAccount intersection record
             // Note: Explicit 'id' mapping removed here since your Model uses the HasUuids trait!
             $ura = UserRoleAccount::create([
                 'user_id'    => $user->id,
@@ -101,7 +101,7 @@ class UserRoleAccountController extends Controller
             return response()->json([
                 'error' => $e->getMessage(),
             ], 500);
-        }   
+        }
     }
 
     /**
@@ -122,7 +122,7 @@ class UserRoleAccountController extends Controller
     {
         // 1️⃣ Validate that the user exists in auth_user
         $userExists = DB::table('auth_user')->where('id', $id)->exists();
-        
+
         if (!$userExists) {
             return response()->json([
                 'error' => 'User account not found.'
@@ -392,7 +392,7 @@ class UserRoleAccountController extends Controller
 
         // 2️⃣ Find the UserRoleAccount context matching the auth_user integer ID
         $ura = UserRoleAccount::where('user_id', $id)->first();
-        
+
         if (!$ura) {
             return response()->json([
                 'success' => false,
@@ -408,7 +408,7 @@ class UserRoleAccountController extends Controller
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
             'profile.phone' => 'nullable|string|max:50',
-            'profile.user.email' => 'required|email|max:254|unique:auth_user,email,' . $id,
+            'profile.user.email' => 'nullable|email|max:254|unique:auth_user,email,' . $id,
             'profile.user.username' => 'required|string|max:150|unique:auth_user,username,' . $id,
             'profile.user.first_name' => 'required|string|max:150',
             'profile.user.last_name' => 'required|string|max:150',
@@ -456,7 +456,7 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Sync Group permissions mappings pivots
             DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
-            
+
             if (!empty($request->groups)) {
                 foreach ($request->groups as $groupId) {
                     DB::table('access_group_users')->insert([
@@ -480,4 +480,4 @@ class UserRoleAccountController extends Controller
             ], 500);
         }
     }
-} 
+}
