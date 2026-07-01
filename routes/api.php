@@ -20,7 +20,7 @@ Route::middleware('auth.token')->group(function () {
     Route::get('/user-role-accounts', [UserRoleAccountController::class, 'index']);
     Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show']);
     Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
-    Route::put('/user-role-accounts/{id}', [UserRoleAccountController::class, 'update']);
+    Route::patch('/user-role-accounts/{id}', [UserRoleAccountController::class, 'update']);
 
     Route::post('/attachments', [AttachmentController::class, 'store']);
 });

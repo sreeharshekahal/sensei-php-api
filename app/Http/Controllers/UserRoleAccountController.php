@@ -426,18 +426,18 @@ class UserRoleAccountController extends Controller
             ], 404);
         }
 
-        // 3️⃣ Run input validation checks (exempting this user's current record)
+        // 3️⃣ Run input validation checks (exempting this user's current record, using 'sometimes' for partial updates)
         $request->validate([
-            'role_id' => 'required|uuid|exists:access_role,id',
-            'groups' => 'required|array',
+            'role_id' => 'sometimes|required|uuid|exists:access_role,id',
+            'groups' => 'sometimes|required|array',
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
             'profile.phone' => 'nullable|string|max:50',
             'profile.user.email' => 'nullable|email|max:254|unique:auth_user,email,' . $id,
-            'profile.user.username' => 'required|string|max:150|unique:auth_user,username,' . $id,
-            'profile.user.first_name' => 'required|string|max:150',
-            'profile.user.last_name' => 'required|string|max:150',
+            'profile.user.username' => 'sometimes|required|string|max:150|unique:auth_user,username,' . $id,
+            'profile.user.first_name' => 'sometimes|required|string|max:150',
+            'profile.user.last_name' => 'sometimes|required|string|max:150',
             'profile.user.password' => 'nullable|string|min:6',
         ]);
 
@@ -448,47 +448,68 @@ class UserRoleAccountController extends Controller
 
         try {
             // 4️⃣ Update Core User Identity rows inside 'auth_user'
-            $userUpdateData = [
-                'username'   => $userData['username'],
-                'email'      => $userData['email'] ?? '',
-                'first_name' => $userData['first_name'],
-                'last_name'  => $userData['last_name'],
-            ];
-
-            if (!empty($userData['password'])) {
+            $userUpdateData = [];
+            if ($request->has('profile.user.username')) {
+                $userUpdateData['username'] = $userData['username'];
+            }
+            if ($request->has('profile.user.email')) {
+                $userUpdateData['email'] = $userData['email'] ?? '';
+            }
+            if ($request->has('profile.user.first_name')) {
+                $userUpdateData['first_name'] = $userData['first_name'];
+            }
+            if ($request->has('profile.user.last_name')) {
+                $userUpdateData['last_name'] = $userData['last_name'];
+            }
+            if ($request->has('profile.user.password') && !empty($userData['password'])) {
                 $userUpdateData['password'] = $this->make_pbkdf2_sha256($userData['password']);
             }
 
-            DB::table('auth_user')->where('id', $id)->update($userUpdateData);
-
-            // 5️⃣ Update Custom Profile Meta fields inside 'common_profile' (Includes phone)
-            DB::table('common_profile')->where('user_id', $id)->update([
-                'designation' => $profileData['designation'] ?? null,
-                'avatar_id'   => $profileData['avatar_id'] ?? null,
-                'phone'       => $profileData['phone'] ?? '',
-                'updated'     => now(),
-            ]);
-
-            // 6️⃣ Re-verify and update current Access Role contextual link
-            $associatedRole = DB::table('access_role')->where('id', $request->role_id)->first();
-            if (!$associatedRole) {
-                throw new \Exception("The selected access role context was not found.");
+            if (!empty($userUpdateData)) {
+                DB::table('auth_user')->where('id', $id)->update($userUpdateData);
             }
 
-            $ura->update([
-                'role_id'    => $request->role_id,
-                'account_id' => $associatedRole->account_id,
-            ]);
+            // 5️⃣ Update Custom Profile Meta fields inside 'common_profile' dynamically
+            $profileUpdateData = [];
+            if ($request->has('profile.designation')) {
+                $profileUpdateData['designation'] = $profileData['designation'] ?? null;
+            }
+            if ($request->has('profile.avatar_id')) {
+                $profileUpdateData['avatar_id'] = $profileData['avatar_id'] ?? null;
+            }
+            if ($request->has('profile.phone')) {
+                $profileUpdateData['phone'] = $profileData['phone'] ?? '';
+            }
 
-            // 7️⃣ Sync Group permissions mappings pivots
-            DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
+            if (!empty($profileUpdateData)) {
+                $profileUpdateData['updated'] = now();
+                DB::table('common_profile')->where('user_id', $id)->update($profileUpdateData);
+            }
 
-            if (!empty($request->groups)) {
-                foreach ($request->groups as $groupId) {
-                    DB::table('access_group_users')->insert([
-                        'userroleaccount_id' => $ura->id,
-                        'group_id'           => $groupId,
-                    ]);
+            // 6️⃣ Re-verify and update current Access Role contextual link dynamically
+            if ($request->has('role_id')) {
+                $associatedRole = DB::table('access_role')->where('id', $request->role_id)->first();
+                if (!$associatedRole) {
+                    throw new \Exception("The selected access role context was not found.");
+                }
+
+                $ura->update([
+                    'role_id'    => $request->role_id,
+                    'account_id' => $associatedRole->account_id,
+                ]);
+            }
+
+            // 7️⃣ Sync Group mappings pivots dynamically if provided
+            if ($request->has('groups')) {
+                DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
+
+                if (!empty($request->groups)) {
+                    foreach ($request->groups as $groupId) {
+                        DB::table('access_group_users')->insert([
+                            'userroleaccount_id' => $ura->id,
+                            'group_id'           => $groupId,
+                        ]);
+                    }
                 }
             }
 

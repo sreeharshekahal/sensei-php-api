@@ -191,7 +191,7 @@
                     "auth": {},
                     "request": {
                         "auth": {},
-                        "method": "PUT",
+                        "method": "PATCH",
                         "body": {
                             "mode": "raw",
                             "raw": "{\r\n    \"role_id\": \"94637b11-f764-49a1-b801-3e9122c49093\",\r\n    \"groups\": [\r\n        \"d02958c8-d747-4096-8372-6fbfb2e7ec00\"\r\n    ],\r\n    \"profile\": {\r\n        \"avatar_id\": null,\r\n        \"designation\": \"Software Engineer\",\r\n        \"phone\": \"9876543210\",\r\n        \"user\": {\r\n            \"username\": \"code.aroma\",\r\n            \"email\": \"code.aroma@gmail.commmmmmm\",\r\n            \"first_name\": \"Code\",\r\n            \"last_name\": \"Aroma\"\r\n        }\r\n    }\r\n}",
