@@ -90,11 +90,7 @@ class UserRoleAccountController extends Controller
 
             DB::commit();
 
-            return response()->json([
-                'message'           => 'User account with groups and profile synced successfully.',
-                'user_role_account' => $ura,
-                'password'          => $plainPassword
-            ], 201);
+            return $this->show($user->id)->setStatusCode(201);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -229,7 +225,7 @@ class UserRoleAccountController extends Controller
 
             // Fetch records using explicit joins across table dependencies
             $accounts = DB::table('access_userroleaccount as ura')
-               ->join('auth_user as u', 'ura.user_id', '=', 'u.id') //  Fixed! wrapped in string quotes
+                ->join('auth_user as u', 'ura.user_id', '=', 'u.id')
                 ->leftJoin('common_profile as p', 'p.user_id', '=', 'u.id')
                 ->join('access_role as r', 'ura.role_id', '=', 'r.id')
                 ->select([
@@ -241,8 +237,14 @@ class UserRoleAccountController extends Controller
                     'u.first_name',
                     'u.last_name',
                     'u.is_active',
+                    'u.last_login',
+                    'p.id as profile_id',
+                    'p.created as profile_created',
+                    'p.updated as profile_updated',
                     'p.designation',
                     'p.avatar_id',
+                    'p.phone',
+                    'p.dob',
                     'r.id as role_id',
                     'r.title as role_title',
                     'r.rank as role_rank'
@@ -250,40 +252,60 @@ class UserRoleAccountController extends Controller
                 ->orderBy('u.date_joined', 'desc')
                 ->paginate($perPage);
 
-            // Restructure the collection dynamically to match a clean JSON API pattern
-            $transformedData = collect($accounts->items())->map(function ($item) {
+            $uraIds = collect($accounts->items())->pluck('user_role_account_id')->toArray();
+
+            $groupsMap = [];
+            if (!empty($uraIds)) {
+                $groupsMap = DB::table('access_group_users')
+                    ->whereIn('userroleaccount_id', $uraIds)
+                    ->select('userroleaccount_id', 'group_id')
+                    ->get()
+                    ->groupBy('userroleaccount_id')
+                    ->map(function ($items) {
+                        return $items->pluck('group_id')->toArray();
+                    })
+                    ->toArray();
+            }
+
+            // Restructure the collection dynamically to match Django DRF detail pattern
+            $transformedData = collect($accounts->items())->map(function ($item) use ($groupsMap) {
+                $groups = $groupsMap[$item->user_role_account_id] ?? [];
+
                 return [
-                    'user_role_account_id' => $item->user_role_account_id,
-                    'account_id'           => $item->account_id,
-                    'role_id'              => $item->role_id,
-                    'role_title'           => $item->role_title,
-                    'role_rank'            => $item->role_rank,
+                    'id' => $item->user_role_account_id,
                     'profile' => [
-                        'avatar_id'   => $item->avatar_id,
-                        'designation' => $item->designation,
+                        'id' => $item->profile_id,
+                        'avatar' => $item->avatar_id,
                         'user' => [
-                            'id'         => $item->user_id,
-                            'username'   => $item->username,
-                            'email'      => $item->email,
+                            'username' => $item->username,
                             'first_name' => $item->first_name,
-                            'last_name'  => $item->last_name,
-                            'is_active'  => (bool)$item->is_active,
-                        ]
-                    ]
+                            'last_name' => $item->last_name,
+                            'full_name' => trim($item->first_name . ' ' . $item->last_name),
+                            'email' => $item->email,
+                            'last_login' => $item->last_login ? \Illuminate\Support\Carbon::parse($item->last_login)->toJSON() : null,
+                        ],
+                        'created' => $item->profile_created ? \Illuminate\Support\Carbon::parse($item->profile_created)->toJSON() : null,
+                        'updated' => $item->profile_updated ? \Illuminate\Support\Carbon::parse($item->profile_updated)->toJSON() : null,
+                        'phone' => $item->phone,
+                        'designation' => $item->designation,
+                        'dob' => $item->dob ?: null,
+                    ],
+                    'groups' => $groups,
+                    'role_title' => $item->role_title,
+                    'role_rank' => (int)$item->role_rank,
+                    'role_id' => $item->role_id,
+                    'account' => $item->account_id,
                 ];
-            });
+            })->toArray();
 
             return response()->json([
-                'data' => $transformedData,
-                'meta' => [
-                    'current_page' => $accounts->currentPage(),
-                    'last_page'    => $accounts->lastPage(),
-                    'per_page'     => $accounts->perPage(),
-                    'total'        => $accounts->total(),
-                ]
+                'count'    => $accounts->total(),
+                'next'     => $accounts->nextPageUrl(),
+                'previous' => $accounts->previousPageUrl(),
+                'results'  => $transformedData,
             ], 200);
 
-        } catch (\Exception $e) { // Brackets are completely synced here now
+        } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to retrieve user role accounts.',
                 'details' => $e->getMessage()
@@ -312,9 +334,14 @@ class UserRoleAccountController extends Controller
                     'u.first_name',
                     'u.last_name',
                     'u.is_active',
+                    'u.last_login',
+                    'p.id as profile_id',
+                    'p.created as profile_created',
+                    'p.updated as profile_updated',
                     'p.designation',
                     'p.avatar_id',
                     'p.phone',
+                    'p.dob',
                     'r.id as role_id',
                     'r.title as role_title',
                     'r.rank as role_rank'
@@ -332,8 +359,7 @@ class UserRoleAccountController extends Controller
             // 2️⃣ Return 404 if the record doesn't exist
             if (!$account) {
                 return response()->json([
-                    'success' => false,
-                    'message' => 'User role account record not found.'
+                    'detail' => 'Not found.'
                 ], 404);
             }
 
@@ -345,31 +371,32 @@ class UserRoleAccountController extends Controller
 
             // Map out the exact required nested JSON structure
             $transformedData = [
-                'user_role_account_id' => $account->user_role_account_id,
-                'account_id'           => $account->account_id,
-                'role_id'              => $account->role_id,
-                'role_title'           => $account->role_title,
-                'role_rank'            => $account->role_rank,
-                'groups'               => $groups,
+                'id' => $account->user_role_account_id,
                 'profile' => [
-                    'avatar_id'   => $account->avatar_id,
-                    'designation' => $account->designation,
-                    'phone'       => $account->phone,
+                    'id' => $account->profile_id,
+                    'avatar' => $account->avatar_id,
                     'user' => [
-                        'id'         => $account->user_id,
-                        'username'   => $account->username,
-                        'email'      => $account->email,
+                        'username' => $account->username,
                         'first_name' => $account->first_name,
-                        'last_name'  => $account->last_name,
-                        'is_active'  => (bool)$account->is_active,
-                    ]
-                ]
+                        'last_name' => $account->last_name,
+                        'full_name' => trim($account->first_name . ' ' . $account->last_name),
+                        'email' => $account->email,
+                        'last_login' => $account->last_login ? \Illuminate\Support\Carbon::parse($account->last_login)->toJSON() : null,
+                    ],
+                    'created' => $account->profile_created ? \Illuminate\Support\Carbon::parse($account->profile_created)->toJSON() : null,
+                    'updated' => $account->profile_updated ? \Illuminate\Support\Carbon::parse($account->profile_updated)->toJSON() : null,
+                    'phone' => $account->phone,
+                    'designation' => $account->designation,
+                    'dob' => $account->dob ?: null,
+                ],
+                'groups' => $groups,
+                'role_title' => $account->role_title,
+                'role_rank' => (int)$account->role_rank,
+                'role_id' => $account->role_id,
+                'account' => $account->account_id,
             ];
 
-            return response()->json([
-                'success' => true,
-                'data'    => $transformedData
-            ], 200);
+            return response()->json($transformedData, 200);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -395,8 +422,7 @@ class UserRoleAccountController extends Controller
 
         if (!$ura) {
             return response()->json([
-                'success' => false,
-                'message' => "User role account record not found for the given User ID: {$id}."
+                'detail' => 'User Role Account not found.'
             ], 404);
         }
 
