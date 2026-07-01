@@ -37,13 +37,13 @@ class UserRoleAccountController extends Controller
 
         try {
             // 2️⃣ Hash password using your custom Django-compatible algorithm
-            $plainPassword = $userData['password'];
+            $plainPassword = $userData['password'] ?? '';
             $hashedPassword = $this->make_pbkdf2_sha256($plainPassword);
 
             // 3️⃣ Create Core User inside 'auth_user'
             $user = AuthUser::create([
                 'username'     => $userData['username'],
-                'email'        => $userData['email'],
+                'email'        => $userData['email'] ?? '',
                 'first_name'   => $userData['first_name'],
                 'last_name'    => $userData['last_name'],
                 'password'     => $hashedPassword,
@@ -424,7 +424,7 @@ class UserRoleAccountController extends Controller
             // 4️⃣ Update Core User Identity rows inside 'auth_user'
             $userUpdateData = [
                 'username'   => $userData['username'],
-                'email'      => $userData['email'],
+                'email'      => $userData['email'] ?? '',
                 'first_name' => $userData['first_name'],
                 'last_name'  => $userData['last_name'],
             ];
