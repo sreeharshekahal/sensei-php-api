@@ -224,11 +224,53 @@ class UserRoleAccountController extends Controller
             $perPage = $request->query('per_page', 15);
 
             // Fetch records using explicit joins across table dependencies
-            $accounts = DB::table('access_userroleaccount as ura')
+            $query = DB::table('access_userroleaccount as ura')
                 ->join('auth_user as u', 'ura.user_id', '=', 'u.id')
                 ->leftJoin('common_profile as p', 'p.user_id', '=', 'u.id')
-                ->join('access_role as r', 'ura.role_id', '=', 'r.id')
-                ->select([
+                ->join('access_role as r', 'ura.role_id', '=', 'r.id');
+
+            // Filter by user__username if provided (exact match to mimic Django filter_fields)
+            if ($request->filled('user__username')) {
+                $query->where('u.username', $request->query('user__username'));
+            }
+
+            // Search by user__first_name, user__last_name, user__username, role__title if search query is provided
+            if ($request->filled('search')) {
+                $searchTerm = '%' . $request->query('search') . '%';
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->where('u.username', 'like', $searchTerm)
+                      ->orWhere('u.first_name', 'like', $searchTerm)
+                      ->orWhere('u.last_name', 'like', $searchTerm)
+                      ->orWhere('r.title', 'like', $searchTerm);
+                });
+            }
+
+            // Dynamic Ordering to match Django ordering_fields
+            $ordering = $request->query('ordering');
+            if ($ordering) {
+                $descending = false;
+                if (str_starts_with($ordering, '-')) {
+                    $descending = true;
+                    $ordering = substr($ordering, 1);
+                }
+
+                $columnMap = [
+                    'user__first_name' => 'u.first_name',
+                    'user__username' => 'u.username',
+                    'role__title' => 'r.title',
+                    'user__email' => 'u.email',
+                ];
+
+                if (isset($columnMap[$ordering])) {
+                    $query->orderBy($columnMap[$ordering], $descending ? 'desc' : 'asc');
+                } else {
+                    $query->orderBy('u.date_joined', 'desc');
+                }
+            } else {
+                $query->orderBy('u.date_joined', 'desc');
+            }
+
+            $accounts = $query->select([
                     'ura.id as user_role_account_id',
                     'ura.account_id',
                     'u.id as user_id',
@@ -249,7 +291,6 @@ class UserRoleAccountController extends Controller
                     'r.title as role_title',
                     'r.rank as role_rank'
                 ])
-                ->orderBy('u.date_joined', 'desc')
                 ->paginate($perPage);
 
             $uraIds = collect($accounts->items())->pluck('user_role_account_id')->toArray();
