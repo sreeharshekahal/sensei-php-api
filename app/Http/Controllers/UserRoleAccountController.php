@@ -22,11 +22,11 @@ class UserRoleAccountController extends Controller
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
-            'profile.user.email' => 'required|email|max:254|unique:auth_user,email',
+            'profile.user.email' => 'nullable|email|max:254|unique:auth_user,email',
             'profile.user.first_name' => 'required|string|max:150',
             'profile.user.last_name' => 'required|string|max:150',
             'profile.user.username' => 'required|string|max:150|unique:auth_user,username',
-            'profile.user.password' => 'required|string|min:6',
+            'profile.user.password' => 'nullable|string|min:6',
         ]);
 
         // Unpack nested payload segments for safe array matching
@@ -37,13 +37,13 @@ class UserRoleAccountController extends Controller
 
         try {
             // 2️⃣ Hash password using your custom Django-compatible algorithm
-            $plainPassword = $userData['password'];
+            $plainPassword = $userData['password'] ?? '';
             $hashedPassword = $this->make_pbkdf2_sha256($plainPassword);
 
             // 3️⃣ Create Core User inside 'auth_user'
             $user = AuthUser::create([
                 'username'     => $userData['username'],
-                'email'        => $userData['email'],
+                'email'        => $userData['email'] ?? '',
                 'first_name'   => $userData['first_name'],
                 'last_name'    => $userData['last_name'],
                 'password'     => $hashedPassword,
@@ -70,7 +70,7 @@ class UserRoleAccountController extends Controller
                 throw new \Exception("The selected access role context was not found.");
             }
 
-            // 6️⃣ Build UserRoleAccount intersection record 
+            // 6️⃣ Build UserRoleAccount intersection record
             // Note: Explicit 'id' mapping removed here since your Model uses the HasUuids trait!
             $ura = UserRoleAccount::create([
                 'user_id'    => $user->id,
@@ -90,18 +90,14 @@ class UserRoleAccountController extends Controller
 
             DB::commit();
 
-            return response()->json([
-                'message'           => 'User account with groups and profile synced successfully.',
-                'user_role_account' => $ura,
-                'password'          => $plainPassword
-            ], 201);
+            return $this->show($user->id)->setStatusCode(201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
                 'error' => $e->getMessage(),
             ], 500);
-        }   
+        }
     }
 
     /**
@@ -122,7 +118,7 @@ class UserRoleAccountController extends Controller
     {
         // 1️⃣ Validate that the user exists in auth_user
         $userExists = DB::table('auth_user')->where('id', $id)->exists();
-        
+
         if (!$userExists) {
             return response()->json([
                 'error' => 'User account not found.'
@@ -229,7 +225,7 @@ class UserRoleAccountController extends Controller
 
             // Fetch records using explicit joins across table dependencies
             $accounts = DB::table('access_userroleaccount as ura')
-               ->join('auth_user as u', 'ura.user_id', '=', 'u.id') //  Fixed! wrapped in string quotes
+                ->join('auth_user as u', 'ura.user_id', '=', 'u.id')
                 ->leftJoin('common_profile as p', 'p.user_id', '=', 'u.id')
                 ->join('access_role as r', 'ura.role_id', '=', 'r.id')
                 ->select([
@@ -241,8 +237,14 @@ class UserRoleAccountController extends Controller
                     'u.first_name',
                     'u.last_name',
                     'u.is_active',
+                    'u.last_login',
+                    'p.id as profile_id',
+                    'p.created as profile_created',
+                    'p.updated as profile_updated',
                     'p.designation',
                     'p.avatar_id',
+                    'p.phone',
+                    'p.dob',
                     'r.id as role_id',
                     'r.title as role_title',
                     'r.rank as role_rank'
@@ -250,40 +252,60 @@ class UserRoleAccountController extends Controller
                 ->orderBy('u.date_joined', 'desc')
                 ->paginate($perPage);
 
-            // Restructure the collection dynamically to match a clean JSON API pattern
-            $transformedData = collect($accounts->items())->map(function ($item) {
+            $uraIds = collect($accounts->items())->pluck('user_role_account_id')->toArray();
+
+            $groupsMap = [];
+            if (!empty($uraIds)) {
+                $groupsMap = DB::table('access_group_users')
+                    ->whereIn('userroleaccount_id', $uraIds)
+                    ->select('userroleaccount_id', 'group_id')
+                    ->get()
+                    ->groupBy('userroleaccount_id')
+                    ->map(function ($items) {
+                        return $items->pluck('group_id')->toArray();
+                    })
+                    ->toArray();
+            }
+
+            // Restructure the collection dynamically to match Django DRF detail pattern
+            $transformedData = collect($accounts->items())->map(function ($item) use ($groupsMap) {
+                $groups = $groupsMap[$item->user_role_account_id] ?? [];
+
                 return [
-                    'user_role_account_id' => $item->user_role_account_id,
-                    'account_id'           => $item->account_id,
-                    'role_id'              => $item->role_id,
-                    'role_title'           => $item->role_title,
-                    'role_rank'            => $item->role_rank,
+                    'id' => $item->user_role_account_id,
                     'profile' => [
-                        'avatar_id'   => $item->avatar_id,
-                        'designation' => $item->designation,
+                        'id' => $item->profile_id,
+                        'avatar' => $item->avatar_id,
                         'user' => [
-                            'id'         => $item->user_id,
-                            'username'   => $item->username,
-                            'email'      => $item->email,
+                            'username' => $item->username,
                             'first_name' => $item->first_name,
-                            'last_name'  => $item->last_name,
-                            'is_active'  => (bool)$item->is_active,
-                        ]
-                    ]
+                            'last_name' => $item->last_name,
+                            'full_name' => trim($item->first_name . ' ' . $item->last_name),
+                            'email' => $item->email,
+                            'last_login' => $item->last_login ? \Illuminate\Support\Carbon::parse($item->last_login)->toJSON() : null,
+                        ],
+                        'created' => $item->profile_created ? \Illuminate\Support\Carbon::parse($item->profile_created)->toJSON() : null,
+                        'updated' => $item->profile_updated ? \Illuminate\Support\Carbon::parse($item->profile_updated)->toJSON() : null,
+                        'phone' => $item->phone,
+                        'designation' => $item->designation,
+                        'dob' => $item->dob ?: null,
+                    ],
+                    'groups' => $groups,
+                    'role_title' => $item->role_title,
+                    'role_rank' => (int)$item->role_rank,
+                    'role_id' => $item->role_id,
+                    'account' => $item->account_id,
                 ];
-            });
+            })->toArray();
 
             return response()->json([
-                'data' => $transformedData,
-                'meta' => [
-                    'current_page' => $accounts->currentPage(),
-                    'last_page'    => $accounts->lastPage(),
-                    'per_page'     => $accounts->perPage(),
-                    'total'        => $accounts->total(),
-                ]
+                'count'    => $accounts->total(),
+                'next'     => $accounts->nextPageUrl(),
+                'previous' => $accounts->previousPageUrl(),
+                'results'  => $transformedData,
             ], 200);
 
-        } catch (\Exception $e) { // Brackets are completely synced here now
+        } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to retrieve user role accounts.',
                 'details' => $e->getMessage()
@@ -312,9 +334,14 @@ class UserRoleAccountController extends Controller
                     'u.first_name',
                     'u.last_name',
                     'u.is_active',
+                    'u.last_login',
+                    'p.id as profile_id',
+                    'p.created as profile_created',
+                    'p.updated as profile_updated',
                     'p.designation',
                     'p.avatar_id',
                     'p.phone',
+                    'p.dob',
                     'r.id as role_id',
                     'r.title as role_title',
                     'r.rank as role_rank'
@@ -332,8 +359,7 @@ class UserRoleAccountController extends Controller
             // 2️⃣ Return 404 if the record doesn't exist
             if (!$account) {
                 return response()->json([
-                    'success' => false,
-                    'message' => 'User role account record not found.'
+                    'detail' => 'Not found.'
                 ], 404);
             }
 
@@ -345,31 +371,32 @@ class UserRoleAccountController extends Controller
 
             // Map out the exact required nested JSON structure
             $transformedData = [
-                'user_role_account_id' => $account->user_role_account_id,
-                'account_id'           => $account->account_id,
-                'role_id'              => $account->role_id,
-                'role_title'           => $account->role_title,
-                'role_rank'            => $account->role_rank,
-                'groups'               => $groups,
+                'id' => $account->user_role_account_id,
                 'profile' => [
-                    'avatar_id'   => $account->avatar_id,
-                    'designation' => $account->designation,
-                    'phone'       => $account->phone,
+                    'id' => $account->profile_id,
+                    'avatar' => $account->avatar_id,
                     'user' => [
-                        'id'         => $account->user_id,
-                        'username'   => $account->username,
-                        'email'      => $account->email,
+                        'username' => $account->username,
                         'first_name' => $account->first_name,
-                        'last_name'  => $account->last_name,
-                        'is_active'  => (bool)$account->is_active,
-                    ]
-                ]
+                        'last_name' => $account->last_name,
+                        'full_name' => trim($account->first_name . ' ' . $account->last_name),
+                        'email' => $account->email,
+                        'last_login' => $account->last_login ? \Illuminate\Support\Carbon::parse($account->last_login)->toJSON() : null,
+                    ],
+                    'created' => $account->profile_created ? \Illuminate\Support\Carbon::parse($account->profile_created)->toJSON() : null,
+                    'updated' => $account->profile_updated ? \Illuminate\Support\Carbon::parse($account->profile_updated)->toJSON() : null,
+                    'phone' => $account->phone,
+                    'designation' => $account->designation,
+                    'dob' => $account->dob ?: null,
+                ],
+                'groups' => $groups,
+                'role_title' => $account->role_title,
+                'role_rank' => (int)$account->role_rank,
+                'role_id' => $account->role_id,
+                'account' => $account->account_id,
             ];
 
-            return response()->json([
-                'success' => true,
-                'data'    => $transformedData
-            ], 200);
+            return response()->json($transformedData, 200);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -392,26 +419,25 @@ class UserRoleAccountController extends Controller
 
         // 2️⃣ Find the UserRoleAccount context matching the auth_user integer ID
         $ura = UserRoleAccount::where('user_id', $id)->first();
-        
+
         if (!$ura) {
             return response()->json([
-                'success' => false,
-                'message' => "User role account record not found for the given User ID: {$id}."
+                'detail' => 'User Role Account not found.'
             ], 404);
         }
 
-        // 3️⃣ Run input validation checks (exempting this user's current record)
+        // 3️⃣ Run input validation checks (exempting this user's current record, using 'sometimes' for partial updates)
         $request->validate([
-            'role_id' => 'required|uuid|exists:access_role,id',
-            'groups' => 'required|array',
+            'role_id' => 'sometimes|required|uuid|exists:access_role,id',
+            'groups' => 'sometimes|required|array',
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
             'profile.phone' => 'nullable|string|max:50',
-            'profile.user.email' => 'required|email|max:254|unique:auth_user,email,' . $id,
-            'profile.user.username' => 'required|string|max:150|unique:auth_user,username,' . $id,
-            'profile.user.first_name' => 'required|string|max:150',
-            'profile.user.last_name' => 'required|string|max:150',
+            'profile.user.email' => 'nullable|email|max:254|unique:auth_user,email,' . $id,
+            'profile.user.username' => 'sometimes|required|string|max:150|unique:auth_user,username,' . $id,
+            'profile.user.first_name' => 'sometimes|required|string|max:150',
+            'profile.user.last_name' => 'sometimes|required|string|max:150',
             'profile.user.password' => 'nullable|string|min:6',
         ]);
 
@@ -422,47 +448,68 @@ class UserRoleAccountController extends Controller
 
         try {
             // 4️⃣ Update Core User Identity rows inside 'auth_user'
-            $userUpdateData = [
-                'username'   => $userData['username'],
-                'email'      => $userData['email'],
-                'first_name' => $userData['first_name'],
-                'last_name'  => $userData['last_name'],
-            ];
-
-            if (!empty($userData['password'])) {
+            $userUpdateData = [];
+            if ($request->has('profile.user.username')) {
+                $userUpdateData['username'] = $userData['username'];
+            }
+            if ($request->has('profile.user.email')) {
+                $userUpdateData['email'] = $userData['email'] ?? '';
+            }
+            if ($request->has('profile.user.first_name')) {
+                $userUpdateData['first_name'] = $userData['first_name'];
+            }
+            if ($request->has('profile.user.last_name')) {
+                $userUpdateData['last_name'] = $userData['last_name'];
+            }
+            if ($request->has('profile.user.password') && !empty($userData['password'])) {
                 $userUpdateData['password'] = $this->make_pbkdf2_sha256($userData['password']);
             }
 
-            DB::table('auth_user')->where('id', $id)->update($userUpdateData);
-
-            // 5️⃣ Update Custom Profile Meta fields inside 'common_profile' (Includes phone)
-            DB::table('common_profile')->where('user_id', $id)->update([
-                'designation' => $profileData['designation'] ?? null,
-                'avatar_id'   => $profileData['avatar_id'] ?? null,
-                'phone'       => $profileData['phone'] ?? '',
-                'updated'     => now(),
-            ]);
-
-            // 6️⃣ Re-verify and update current Access Role contextual link
-            $associatedRole = DB::table('access_role')->where('id', $request->role_id)->first();
-            if (!$associatedRole) {
-                throw new \Exception("The selected access role context was not found.");
+            if (!empty($userUpdateData)) {
+                DB::table('auth_user')->where('id', $id)->update($userUpdateData);
             }
 
-            $ura->update([
-                'role_id'    => $request->role_id,
-                'account_id' => $associatedRole->account_id,
-            ]);
+            // 5️⃣ Update Custom Profile Meta fields inside 'common_profile' dynamically
+            $profileUpdateData = [];
+            if ($request->has('profile.designation')) {
+                $profileUpdateData['designation'] = $profileData['designation'] ?? null;
+            }
+            if ($request->has('profile.avatar_id')) {
+                $profileUpdateData['avatar_id'] = $profileData['avatar_id'] ?? null;
+            }
+            if ($request->has('profile.phone')) {
+                $profileUpdateData['phone'] = $profileData['phone'] ?? '';
+            }
 
-            // 7️⃣ Sync Group permissions mappings pivots
-            DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
-            
-            if (!empty($request->groups)) {
-                foreach ($request->groups as $groupId) {
-                    DB::table('access_group_users')->insert([
-                        'userroleaccount_id' => $ura->id,
-                        'group_id'           => $groupId,
-                    ]);
+            if (!empty($profileUpdateData)) {
+                $profileUpdateData['updated'] = now();
+                DB::table('common_profile')->where('user_id', $id)->update($profileUpdateData);
+            }
+
+            // 6️⃣ Re-verify and update current Access Role contextual link dynamically
+            if ($request->has('role_id')) {
+                $associatedRole = DB::table('access_role')->where('id', $request->role_id)->first();
+                if (!$associatedRole) {
+                    throw new \Exception("The selected access role context was not found.");
+                }
+
+                $ura->update([
+                    'role_id'    => $request->role_id,
+                    'account_id' => $associatedRole->account_id,
+                ]);
+            }
+
+            // 7️⃣ Sync Group mappings pivots dynamically if provided
+            if ($request->has('groups')) {
+                DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
+
+                if (!empty($request->groups)) {
+                    foreach ($request->groups as $groupId) {
+                        DB::table('access_group_users')->insert([
+                            'userroleaccount_id' => $ura->id,
+                            'group_id'           => $groupId,
+                        ]);
+                    }
                 }
             }
 
@@ -480,4 +527,4 @@ class UserRoleAccountController extends Controller
             ], 500);
         }
     }
-} 
+}

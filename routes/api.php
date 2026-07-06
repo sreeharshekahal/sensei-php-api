@@ -15,13 +15,15 @@ use App\Http\Controllers\UserRoleAccountController;
 | is assigned the "api" middleware group. Enjoy building your API!
 |
 */
-Route::delete('/user-role-accounts/{id}', [UserRoleAccountController::class, 'destroy']);
-Route::get('/user-role-accounts', [UserRoleAccountController::class, 'index']);
-Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show']);
-Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
-Route::put('/user-role-accounts/{id}', [UserRoleAccountController::class, 'update']);
+Route::middleware('auth.token')->group(function () {
+    Route::delete('/user-role-accounts/{id}', [UserRoleAccountController::class, 'destroy']);
+    Route::get('/user-role-accounts', [UserRoleAccountController::class, 'index']);
+    Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show']);
+    Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
+    Route::patch('/user-role-accounts/{id}', [UserRoleAccountController::class, 'update']);
 
-Route::post('/attachments', [AttachmentController::class, 'store']);
+    Route::post('/attachments', [AttachmentController::class, 'store']);
+});
 
 
 // Route::post('/user-role-accounts-2', [UserRoleAccountController::class, 'storeUser']);
