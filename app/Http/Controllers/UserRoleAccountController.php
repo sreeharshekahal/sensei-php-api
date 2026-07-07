@@ -18,7 +18,7 @@ class UserRoleAccountController extends Controller
         // 1️⃣ Validate your exact 100% required nested JSON payload structure
         $request->validate([
             'role_id' => 'required|uuid|exists:access_role,id',
-            'groups' => 'required|array',
+            'groups' => 'nullable|array',
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
@@ -37,7 +37,12 @@ class UserRoleAccountController extends Controller
 
         try {
             // 2️⃣ Hash password using your custom Django-compatible algorithm
-            $plainPassword = $userData['password'] ?? '';
+            $plainPassword = $userData['password'] ?? null;
+            $sendSetPasswordEmail = false;
+            if (empty($plainPassword)) {
+                $plainPassword = Str::random(12);
+                $sendSetPasswordEmail = true;
+            }
             $hashedPassword = $this->make_pbkdf2_sha256($plainPassword);
 
             // 3️⃣ Create Core User inside 'auth_user'
@@ -80,7 +85,8 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Bind userroleaccount record context to multiple groups
             if (!empty($request->groups)) {
-                foreach ($request->groups as $groupId) {
+                $uniqueGroups = array_values(array_unique($request->groups));
+                foreach ($uniqueGroups as $groupId) {
                     DB::table('access_group_users')->insert([
                         'userroleaccount_id' => $ura->id, // Accurately captures the auto-generated model UUID
                         'group_id'           => $groupId,
@@ -89,6 +95,15 @@ class UserRoleAccountController extends Controller
             }
 
             DB::commit();
+
+            // 8️⃣ Send password set link if password was not provided
+            if ($sendSetPasswordEmail) {
+                try {
+                    \Illuminate\Support\Facades\Password::broker()->sendResetLink(['email' => $user->email]);
+                } catch (\Exception $mailException) {
+                    \Illuminate\Support\Facades\Log::warning("Could not send password set email to {$user->email}: " . $mailException->getMessage());
+                }
+            }
 
             return $this->show($user->id)->setStatusCode(201);
 
@@ -103,7 +118,7 @@ class UserRoleAccountController extends Controller
     /**
      * Custom Django-compatible PBKDF2-SHA256 hash
      */
-    private function make_pbkdf2_sha256($password, $iterations = 36000, $length = 32)
+    private function make_pbkdf2_sha256(string $password, int $iterations = 36000, int $length = 32): string
     {
         $salt = base64_encode(random_bytes(12));
         $hash = base64_encode(hash_pbkdf2('sha256', $password, $salt, $iterations, $length, true));
@@ -114,7 +129,7 @@ class UserRoleAccountController extends Controller
     /**
      * Delete a user along with all associated profiles, roles, observations, tokens, and group mappings
      */
-    public function destroy($id)
+    public function destroy(int|string $id)
     {
         // 1️⃣ Validate that the user exists in auth_user
         $userExists = DB::table('auth_user')->where('id', $id)->exists();
@@ -358,7 +373,7 @@ class UserRoleAccountController extends Controller
      * Display the specified user role account detail with profile, role, and groups
      * (Supports both User ID integer and Role Account UUID lookups)
      */
-    public function show($id)
+    public function show(int|string $id)
     {
         try {
             // 1️⃣ Fetch the core record with explicit joins
@@ -451,7 +466,7 @@ class UserRoleAccountController extends Controller
     /**
      * Update an existing user role account by auth_user integer ID
      */
-    public function update(Request $request, $id)
+    public function update(Request $request, int|string $id)
     {
         // 1️⃣ Automatically strip the outer "data" key layer if present in input payloads
         if ($request->has('data')) {
@@ -459,7 +474,7 @@ class UserRoleAccountController extends Controller
         }
 
         // 2️⃣ Find the UserRoleAccount context matching the auth_user integer ID
-        $ura = UserRoleAccount::where('user_id', $id)->first();
+        $ura = UserRoleAccount::firstWhere('user_id', $id);
 
         if (!$ura) {
             return response()->json([
@@ -470,7 +485,7 @@ class UserRoleAccountController extends Controller
         // 3️⃣ Run input validation checks (exempting this user's current record, using 'sometimes' for partial updates)
         $request->validate([
             'role_id' => 'sometimes|required|uuid|exists:access_role,id',
-            'groups' => 'sometimes|required|array',
+            'groups' => 'sometimes|nullable|array',
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
@@ -545,7 +560,8 @@ class UserRoleAccountController extends Controller
                 DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
 
                 if (!empty($request->groups)) {
-                    foreach ($request->groups as $groupId) {
+                    $uniqueGroups = array_values(array_unique($request->groups));
+                    foreach ($uniqueGroups as $groupId) {
                         DB::table('access_group_users')->insert([
                             'userroleaccount_id' => $ura->id,
                             'group_id'           => $groupId,
