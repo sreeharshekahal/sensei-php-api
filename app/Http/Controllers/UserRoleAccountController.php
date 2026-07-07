@@ -85,12 +85,24 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Bind userroleaccount record context to multiple groups
             if (!empty($request->groups)) {
-                $uniqueGroups = array_values(array_unique($request->groups));
-                foreach ($uniqueGroups as $groupId) {
-                    DB::table('access_group_users')->insert([
-                        'userroleaccount_id' => $ura->id, // Accurately captures the auto-generated model UUID
-                        'group_id'           => $groupId,
-                    ]);
+                try {
+                    $ura->groups()->attach($request->groups);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    // If it's a primary key unique key violation (due to Postgres sequence mismatch)
+                    if ($e->getCode() == '23505' && str_contains($e->getMessage(), 'access_group_users_pkey')) {
+                        // Self-heal: Sync sequence to the maximum ID currently in the table
+                        $maxIdResult = DB::select("SELECT MAX(id) as max_id FROM access_group_users");
+                        $maxId = $maxIdResult[0]->max_id ?? 0;
+                        $nextVal = max($maxId, 1);
+                        $isCalled = $maxId > 0 ? 'true' : 'false';
+
+                        DB::statement("SELECT setval('access_group_users_id_seq', {$nextVal}, {$isCalled})");
+
+                        // Re-attempt attach
+                        $ura->groups()->attach($request->groups);
+                    } else {
+                        throw $e;
+                    }
                 }
             }
 
@@ -557,15 +569,23 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Sync Group mappings pivots dynamically if provided
             if ($request->has('groups')) {
-                DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
+                try {
+                    $ura->groups()->sync($request->groups ?? []);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    // If it's a primary key unique key violation (due to Postgres sequence mismatch)
+                    if ($e->getCode() == '23505' && str_contains($e->getMessage(), 'access_group_users_pkey')) {
+                        // Self-heal: Sync sequence to the maximum ID currently in the table
+                        $maxIdResult = DB::select("SELECT MAX(id) as max_id FROM access_group_users");
+                        $maxId = $maxIdResult[0]->max_id ?? 0;
+                        $nextVal = max($maxId, 1);
+                        $isCalled = $maxId > 0 ? 'true' : 'false';
 
-                if (!empty($request->groups)) {
-                    $uniqueGroups = array_values(array_unique($request->groups));
-                    foreach ($uniqueGroups as $groupId) {
-                        DB::table('access_group_users')->insert([
-                            'userroleaccount_id' => $ura->id,
-                            'group_id'           => $groupId,
-                        ]);
+                        DB::statement("SELECT setval('access_group_users_id_seq', {$nextVal}, {$isCalled})");
+
+                        // Re-attempt sync
+                        $ura->groups()->sync($request->groups ?? []);
+                    } else {
+                        throw $e;
                     }
                 }
             }
