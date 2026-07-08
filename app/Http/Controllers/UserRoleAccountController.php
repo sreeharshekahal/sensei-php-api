@@ -18,7 +18,7 @@ class UserRoleAccountController extends Controller
         // 1️⃣ Validate your exact 100% required nested JSON payload structure
         $request->validate([
             'role_id' => 'required|uuid|exists:access_role,id',
-            'groups' => 'required|array',
+            'groups' => 'nullable|array',
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
@@ -37,7 +37,12 @@ class UserRoleAccountController extends Controller
 
         try {
             // 2️⃣ Hash password using your custom Django-compatible algorithm
-            $plainPassword = $userData['password'] ?? '';
+            $plainPassword = $userData['password'] ?? null;
+            $sendSetPasswordEmail = false;
+            if (empty($plainPassword)) {
+                $plainPassword = Str::random(12);
+                $sendSetPasswordEmail = true;
+            }
             $hashedPassword = $this->make_pbkdf2_sha256($plainPassword);
 
             // 3️⃣ Create Core User inside 'auth_user'
@@ -80,15 +85,20 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Bind userroleaccount record context to multiple groups
             if (!empty($request->groups)) {
-                foreach ($request->groups as $groupId) {
-                    DB::table('access_group_users')->insert([
-                        'userroleaccount_id' => $ura->id, // Accurately captures the auto-generated model UUID
-                        'group_id'           => $groupId,
-                    ]);
-                }
+                $this->syncGroupUsersSequence();
+                $ura->groups()->attach($request->groups);
             }
 
             DB::commit();
+
+            // 8️⃣ Send password set link if password was not provided
+            if ($sendSetPasswordEmail) {
+                try {
+                    \Illuminate\Support\Facades\Password::broker()->sendResetLink(['email' => $user->email]);
+                } catch (\Exception $mailException) {
+                    \Illuminate\Support\Facades\Log::warning("Could not send password set email to {$user->email}: " . $mailException->getMessage());
+                }
+            }
 
             return $this->show($user->id)->setStatusCode(201);
 
@@ -103,7 +113,7 @@ class UserRoleAccountController extends Controller
     /**
      * Custom Django-compatible PBKDF2-SHA256 hash
      */
-    private function make_pbkdf2_sha256($password, $iterations = 36000, $length = 32)
+    private function make_pbkdf2_sha256(string $password, int $iterations = 36000, int $length = 32): string
     {
         $salt = base64_encode(random_bytes(12));
         $hash = base64_encode(hash_pbkdf2('sha256', $password, $salt, $iterations, $length, true));
@@ -112,9 +122,28 @@ class UserRoleAccountController extends Controller
     }
 
     /**
+     * Synchronize the PostgreSQL sequence for access_group_users to MAX(id).
+     *
+     * This is the PHP equivalent of Django's `python manage.py sqlsequencereset access`.
+     * Postgres sequences are non-transactional — setval() takes effect immediately
+     * and persists even if the surrounding transaction is rolled back. Calling this
+     * pre-emptively guarantees the next INSERT never collides with an existing id.
+     */
+    private function syncGroupUsersSequence(): void
+    {
+        DB::statement("
+            SELECT setval(
+                'access_group_users_id_seq',
+                COALESCE((SELECT MAX(id) FROM access_group_users), 1),
+                true
+            )
+        ");
+    }
+
+    /**
      * Delete a user along with all associated profiles, roles, observations, tokens, and group mappings
      */
-    public function destroy($id)
+    public function destroy(int|string $id)
     {
         // 1️⃣ Validate that the user exists in auth_user
         $userExists = DB::table('auth_user')->where('id', $id)->exists();
@@ -224,11 +253,53 @@ class UserRoleAccountController extends Controller
             $perPage = $request->query('per_page', 15);
 
             // Fetch records using explicit joins across table dependencies
-            $accounts = DB::table('access_userroleaccount as ura')
+            $query = DB::table('access_userroleaccount as ura')
                 ->join('auth_user as u', 'ura.user_id', '=', 'u.id')
                 ->leftJoin('common_profile as p', 'p.user_id', '=', 'u.id')
-                ->join('access_role as r', 'ura.role_id', '=', 'r.id')
-                ->select([
+                ->join('access_role as r', 'ura.role_id', '=', 'r.id');
+
+            // Filter by user__username if provided (exact match to mimic Django filter_fields)
+            if ($request->filled('user__username')) {
+                $query->where('u.username', $request->query('user__username'));
+            }
+
+            // Search by user__first_name, user__last_name, user__username, role__title if search query is provided
+            if ($request->filled('search')) {
+                $searchTerm = '%' . $request->query('search') . '%';
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->where('u.username', 'like', $searchTerm)
+                      ->orWhere('u.first_name', 'like', $searchTerm)
+                      ->orWhere('u.last_name', 'like', $searchTerm)
+                      ->orWhere('r.title', 'like', $searchTerm);
+                });
+            }
+
+            // Dynamic Ordering to match Django ordering_fields
+            $ordering = $request->query('ordering');
+            if ($ordering) {
+                $descending = false;
+                if (str_starts_with($ordering, '-')) {
+                    $descending = true;
+                    $ordering = substr($ordering, 1);
+                }
+
+                $columnMap = [
+                    'user__first_name' => 'u.first_name',
+                    'user__username' => 'u.username',
+                    'role__title' => 'r.title',
+                    'user__email' => 'u.email',
+                ];
+
+                if (isset($columnMap[$ordering])) {
+                    $query->orderBy($columnMap[$ordering], $descending ? 'desc' : 'asc');
+                } else {
+                    $query->orderBy('u.date_joined', 'desc');
+                }
+            } else {
+                $query->orderBy('u.date_joined', 'desc');
+            }
+
+            $accounts = $query->select([
                     'ura.id as user_role_account_id',
                     'ura.account_id',
                     'u.id as user_id',
@@ -249,7 +320,6 @@ class UserRoleAccountController extends Controller
                     'r.title as role_title',
                     'r.rank as role_rank'
                 ])
-                ->orderBy('u.date_joined', 'desc')
                 ->paginate($perPage);
 
             $uraIds = collect($accounts->items())->pluck('user_role_account_id')->toArray();
@@ -317,7 +387,7 @@ class UserRoleAccountController extends Controller
      * Display the specified user role account detail with profile, role, and groups
      * (Supports both User ID integer and Role Account UUID lookups)
      */
-    public function show($id)
+    public function show(int|string $id)
     {
         try {
             // 1️⃣ Fetch the core record with explicit joins
@@ -410,7 +480,7 @@ class UserRoleAccountController extends Controller
     /**
      * Update an existing user role account by auth_user integer ID
      */
-    public function update(Request $request, $id)
+    public function update(Request $request, int|string $id)
     {
         // 1️⃣ Automatically strip the outer "data" key layer if present in input payloads
         if ($request->has('data')) {
@@ -418,7 +488,7 @@ class UserRoleAccountController extends Controller
         }
 
         // 2️⃣ Find the UserRoleAccount context matching the auth_user integer ID
-        $ura = UserRoleAccount::where('user_id', $id)->first();
+        $ura = UserRoleAccount::firstWhere('user_id', $id);
 
         if (!$ura) {
             return response()->json([
@@ -429,7 +499,7 @@ class UserRoleAccountController extends Controller
         // 3️⃣ Run input validation checks (exempting this user's current record, using 'sometimes' for partial updates)
         $request->validate([
             'role_id' => 'sometimes|required|uuid|exists:access_role,id',
-            'groups' => 'sometimes|required|array',
+            'groups' => 'sometimes|nullable|array',
             'groups.*' => 'uuid|exists:access_group,id',
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
@@ -501,16 +571,8 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Sync Group mappings pivots dynamically if provided
             if ($request->has('groups')) {
-                DB::table('access_group_users')->where('userroleaccount_id', $ura->id)->delete();
-
-                if (!empty($request->groups)) {
-                    foreach ($request->groups as $groupId) {
-                        DB::table('access_group_users')->insert([
-                            'userroleaccount_id' => $ura->id,
-                            'group_id'           => $groupId,
-                        ]);
-                    }
-                }
+                $this->syncGroupUsersSequence();
+                $ura->groups()->sync($request->groups ?? []);
             }
 
             DB::commit();

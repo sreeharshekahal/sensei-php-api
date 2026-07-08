@@ -49,13 +49,13 @@ class UserRoleAccount extends Model
     //     return $this->belongsTo(AuthUser::class, 'user_id');
     // }
 
-    // public function groups()
-    // {
-    //     return $this->belongsToMany(
-    //         AccessGroup::class,
-    //         'access_group_users',
-    //         'userroleaccount_id',
-    //         'group_id'
-    //     );
-    // }
+    public function groups()
+    {
+        return $this->belongsToMany(
+            Group::class,
+            'access_group_users',
+            'userroleaccount_id',
+            'group_id'
+        );
+    }
 }
