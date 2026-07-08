@@ -85,25 +85,8 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Bind userroleaccount record context to multiple groups
             if (!empty($request->groups)) {
-                try {
-                    $ura->groups()->attach($request->groups);
-                } catch (\Illuminate\Database\QueryException $e) {
-                    // If it's a primary key unique key violation (due to Postgres sequence mismatch)
-                    if ($e->getCode() == '23505' && str_contains($e->getMessage(), 'access_group_users_pkey')) {
-                        // Self-heal: Sync sequence to the maximum ID currently in the table
-                        $maxIdResult = DB::select("SELECT MAX(id) as max_id FROM access_group_users");
-                        $maxId = $maxIdResult[0]->max_id ?? 0;
-                        $nextVal = max($maxId, 1);
-                        $isCalled = $maxId > 0 ? 'true' : 'false';
-
-                        DB::statement("SELECT setval('access_group_users_id_seq', {$nextVal}, {$isCalled})");
-
-                        // Re-attempt attach
-                        $ura->groups()->attach($request->groups);
-                    } else {
-                        throw $e;
-                    }
-                }
+                $this->syncGroupUsersSequence();
+                $ura->groups()->attach($request->groups);
             }
 
             DB::commit();
@@ -136,6 +119,25 @@ class UserRoleAccountController extends Controller
         $hash = base64_encode(hash_pbkdf2('sha256', $password, $salt, $iterations, $length, true));
 
         return "pbkdf2_sha256$$iterations$$salt$$hash";
+    }
+
+    /**
+     * Synchronize the PostgreSQL sequence for access_group_users to MAX(id).
+     *
+     * This is the PHP equivalent of Django's `python manage.py sqlsequencereset access`.
+     * Postgres sequences are non-transactional — setval() takes effect immediately
+     * and persists even if the surrounding transaction is rolled back. Calling this
+     * pre-emptively guarantees the next INSERT never collides with an existing id.
+     */
+    private function syncGroupUsersSequence(): void
+    {
+        DB::statement("
+            SELECT setval(
+                'access_group_users_id_seq',
+                COALESCE((SELECT MAX(id) FROM access_group_users), 1),
+                true
+            )
+        ");
     }
 
     /**
@@ -569,25 +571,8 @@ class UserRoleAccountController extends Controller
 
             // 7️⃣ Sync Group mappings pivots dynamically if provided
             if ($request->has('groups')) {
-                try {
-                    $ura->groups()->sync($request->groups ?? []);
-                } catch (\Illuminate\Database\QueryException $e) {
-                    // If it's a primary key unique key violation (due to Postgres sequence mismatch)
-                    if ($e->getCode() == '23505' && str_contains($e->getMessage(), 'access_group_users_pkey')) {
-                        // Self-heal: Sync sequence to the maximum ID currently in the table
-                        $maxIdResult = DB::select("SELECT MAX(id) as max_id FROM access_group_users");
-                        $maxId = $maxIdResult[0]->max_id ?? 0;
-                        $nextVal = max($maxId, 1);
-                        $isCalled = $maxId > 0 ? 'true' : 'false';
-
-                        DB::statement("SELECT setval('access_group_users_id_seq', {$nextVal}, {$isCalled})");
-
-                        // Re-attempt sync
-                        $ura->groups()->sync($request->groups ?? []);
-                    } else {
-                        throw $e;
-                    }
-                }
+                $this->syncGroupUsersSequence();
+                $ura->groups()->sync($request->groups ?? []);
             }
 
             DB::commit();
