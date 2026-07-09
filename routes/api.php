@@ -17,6 +17,7 @@ use App\Http\Controllers\UserRoleAccountController;
 */
 Route::middleware('auth.token')->group(function () {
     Route::delete('/user-role-accounts/{id}', [UserRoleAccountController::class, 'destroy']);
+    Route::post('/user-role-accounts/bulk_delete', [UserRoleAccountController::class, 'bulkDelete']);
     Route::get('/user-role-accounts', [UserRoleAccountController::class, 'index']);
     Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show']);
     Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);

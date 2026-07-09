@@ -611,4 +611,98 @@ class UserRoleAccountController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Bulk delete user role accounts and their associated users, profiles, and tokens
+     */
+    public function bulkDelete(Request $request)
+    {
+        $request->validate([
+            'uras' => 'required|array',
+            'uras.*' => 'uuid|exists:access_userroleaccount,id',
+        ]);
+
+        $uraIds = $request->input('uras');
+
+        DB::beginTransaction();
+
+        try {
+            // Find all user IDs linked to these UserRoleAccounts
+            $userIds = DB::table('access_userroleaccount')
+                ->whereIn('id', $uraIds)
+                ->pluck('user_id')
+                ->toArray();
+
+            if (!empty($userIds)) {
+                // Find all observation IDs where these users are involved
+                $observationIds = DB::table('observations_observation')
+                    ->whereIn('observee_id', $uraIds)
+                    ->orWhereIn('observer_id', $uraIds)
+                    ->pluck('id')
+                    ->toArray();
+
+                if (!empty($observationIds)) {
+                    $evidenceIds = DB::table('observations_evidence')
+                        ->whereIn('observation_id', $observationIds)
+                        ->pluck('id')
+                        ->toArray();
+
+                    if (!empty($evidenceIds)) {
+                        DB::table('observations_indicatorrating')
+                            ->whereIn('evidence_id', $evidenceIds)
+                            ->delete();
+
+                        DB::table('observations_evidence_attachments')
+                            ->whereIn('evidence_id', $evidenceIds)
+                            ->delete();
+
+                        DB::table('observations_evidence')
+                            ->whereIn('id', $evidenceIds)
+                            ->delete();
+                    }
+
+                    DB::table('observations_observation')
+                        ->whereIn('id', $observationIds)
+                        ->delete();
+                }
+
+                // Delete group associations
+                DB::table('access_group_users')
+                    ->whereIn('userroleaccount_id', $uraIds)
+                    ->delete();
+
+                // Delete from access_userroleaccount
+                DB::table('access_userroleaccount')
+                    ->whereIn('user_id', $userIds)
+                    ->delete();
+
+                // Delete from common_profile
+                DB::table('common_profile')
+                    ->whereIn('user_id', $userIds)
+                    ->delete();
+
+                // Clear active API login tokens
+                DB::table('authtoken_token')
+                    ->whereIn('user_id', $userIds)
+                    ->delete();
+
+                // Delete core user records from auth_user
+                DB::table('auth_user')
+                    ->whereIn('id', $userIds)
+                    ->delete();
+            }
+
+            DB::commit();
+
+            return response()->noContent();
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to bulk delete users safely.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
