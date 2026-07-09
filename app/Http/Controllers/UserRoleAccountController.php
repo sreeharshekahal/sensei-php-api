@@ -146,7 +146,23 @@ class UserRoleAccountController extends Controller
     public function destroy(int|string $id)
     {
         // 1️⃣ Validate that the user exists in auth_user
-        $userExists = DB::table('auth_user')->where('id', $id)->exists();
+        $userId = null;
+        if (is_numeric($id)) {
+            $userId = (int)$id;
+        } else {
+            $ura = UserRoleAccount::find($id);
+            if ($ura) {
+                $userId = $ura->user_id;
+            }
+        }
+
+        if (!$userId) {
+            return response()->json([
+                'error' => 'User account not found.'
+            ], 404);
+        }
+
+        $userExists = DB::table('auth_user')->where('id', $userId)->exists();
 
         if (!$userExists) {
             return response()->json([
@@ -159,7 +175,7 @@ class UserRoleAccountController extends Controller
         try {
             // 2️⃣ Find all UserRoleAccount IDs linked to this user
             $uraIds = DB::table('access_userroleaccount')
-                ->where('user_id', $id)
+                ->where('user_id', $userId)
                 ->pluck('id')
                 ->toArray();
 
@@ -209,29 +225,29 @@ class UserRoleAccountController extends Controller
 
             // 5️⃣ Delete from access_userroleaccount
             DB::table('access_userroleaccount')
-                ->where('user_id', $id)
+                ->where('user_id', $userId)
                 ->delete();
 
             // 6️⃣ Delete from common_profile
             DB::table('common_profile')
-                ->where('user_id', $id)
+                ->where('user_id', $userId)
                 ->delete();
 
             // 7️⃣ Clear active API login tokens (Fixes the new authtoken_token constraint violation)
             DB::table('authtoken_token')
-                ->where('user_id', $id)
+                ->where('user_id', $userId)
                 ->delete();
 
             // 8️⃣ Delete core user record from auth_user
             DB::table('auth_user')
-                ->where('id', $id)
+                ->where('id', $userId)
                 ->delete();
 
             DB::commit();
 
             return response()->json([
                 'message' => 'User account and all deep relational token structures deleted successfully.',
-                'deleted_user_id' => (int)$id
+                'deleted_user_id' => (int)$userId
             ], 200);
 
         } catch (\Exception $e) {
@@ -478,7 +494,7 @@ class UserRoleAccountController extends Controller
     }
 
     /**
-     * Update an existing user role account by auth_user integer ID
+     * Update an existing user role account by auth_user integer ID or UserRoleAccount UUID
      */
     public function update(Request $request, int|string $id)
     {
@@ -487,14 +503,20 @@ class UserRoleAccountController extends Controller
             $request->merge($request->input('data'));
         }
 
-        // 2️⃣ Find the UserRoleAccount context matching the auth_user integer ID
-        $ura = UserRoleAccount::firstWhere('user_id', $id);
+        // 2️⃣ Find the UserRoleAccount context matching the ID (numeric user ID or UUID)
+        if (is_numeric($id)) {
+            $ura = UserRoleAccount::firstWhere('user_id', $id);
+        } else {
+            $ura = UserRoleAccount::find($id);
+        }
 
         if (!$ura) {
             return response()->json([
                 'detail' => 'User Role Account not found.'
             ], 404);
         }
+
+        $userId = $ura->user_id;
 
         // 3️⃣ Run input validation checks (exempting this user's current record, using 'sometimes' for partial updates)
         $request->validate([
@@ -504,8 +526,8 @@ class UserRoleAccountController extends Controller
             'profile.designation' => 'nullable|string|max:255',
             'profile.avatar_id' => 'nullable|uuid',
             'profile.phone' => 'nullable|string|max:50',
-            'profile.user.email' => 'nullable|email|max:254|unique:auth_user,email,' . $id,
-            'profile.user.username' => 'sometimes|required|string|max:150|unique:auth_user,username,' . $id,
+            'profile.user.email' => 'nullable|email|max:254|unique:auth_user,email,' . $userId,
+            'profile.user.username' => 'sometimes|required|string|max:150|unique:auth_user,username,' . $userId,
             'profile.user.first_name' => 'sometimes|required|string|max:150',
             'profile.user.last_name' => 'sometimes|required|string|max:150',
             'profile.user.password' => 'nullable|string|min:6',
@@ -536,7 +558,7 @@ class UserRoleAccountController extends Controller
             }
 
             if (!empty($userUpdateData)) {
-                DB::table('auth_user')->where('id', $id)->update($userUpdateData);
+                DB::table('auth_user')->where('id', $userId)->update($userUpdateData);
             }
 
             // 5️⃣ Update Custom Profile Meta fields inside 'common_profile' dynamically
@@ -553,7 +575,7 @@ class UserRoleAccountController extends Controller
 
             if (!empty($profileUpdateData)) {
                 $profileUpdateData['updated'] = now();
-                DB::table('common_profile')->where('user_id', $id)->update($profileUpdateData);
+                DB::table('common_profile')->where('user_id', $userId)->update($profileUpdateData);
             }
 
             // 6️⃣ Re-verify and update current Access Role contextual link dynamically
@@ -577,7 +599,7 @@ class UserRoleAccountController extends Controller
 
             DB::commit();
 
-            // 8️⃣ Safely pass the user ID integer context to get pure structural JSON returned
+            // 8️⃣ Safely pass the user ID/UUID context to get pure structural JSON returned
             return $this->show($id);
 
         } catch (\Exception $e) {
@@ -585,6 +607,100 @@ class UserRoleAccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update user account safely.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk delete user role accounts and their associated users, profiles, and tokens
+     */
+    public function bulkDelete(Request $request)
+    {
+        $request->validate([
+            'uras' => 'required|array',
+            'uras.*' => 'uuid|exists:access_userroleaccount,id',
+        ]);
+
+        $uraIds = $request->input('uras');
+
+        DB::beginTransaction();
+
+        try {
+            // Find all user IDs linked to these UserRoleAccounts
+            $userIds = DB::table('access_userroleaccount')
+                ->whereIn('id', $uraIds)
+                ->pluck('user_id')
+                ->toArray();
+
+            if (!empty($userIds)) {
+                // Find all observation IDs where these users are involved
+                $observationIds = DB::table('observations_observation')
+                    ->whereIn('observee_id', $uraIds)
+                    ->orWhereIn('observer_id', $uraIds)
+                    ->pluck('id')
+                    ->toArray();
+
+                if (!empty($observationIds)) {
+                    $evidenceIds = DB::table('observations_evidence')
+                        ->whereIn('observation_id', $observationIds)
+                        ->pluck('id')
+                        ->toArray();
+
+                    if (!empty($evidenceIds)) {
+                        DB::table('observations_indicatorrating')
+                            ->whereIn('evidence_id', $evidenceIds)
+                            ->delete();
+
+                        DB::table('observations_evidence_attachments')
+                            ->whereIn('evidence_id', $evidenceIds)
+                            ->delete();
+
+                        DB::table('observations_evidence')
+                            ->whereIn('id', $evidenceIds)
+                            ->delete();
+                    }
+
+                    DB::table('observations_observation')
+                        ->whereIn('id', $observationIds)
+                        ->delete();
+                }
+
+                // Delete group associations
+                DB::table('access_group_users')
+                    ->whereIn('userroleaccount_id', $uraIds)
+                    ->delete();
+
+                // Delete from access_userroleaccount
+                DB::table('access_userroleaccount')
+                    ->whereIn('user_id', $userIds)
+                    ->delete();
+
+                // Delete from common_profile
+                DB::table('common_profile')
+                    ->whereIn('user_id', $userIds)
+                    ->delete();
+
+                // Clear active API login tokens
+                DB::table('authtoken_token')
+                    ->whereIn('user_id', $userIds)
+                    ->delete();
+
+                // Delete core user records from auth_user
+                DB::table('auth_user')
+                    ->whereIn('id', $userIds)
+                    ->delete();
+            }
+
+            DB::commit();
+
+            return response()->noContent();
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to bulk delete users safely.',
                 'details' => $e->getMessage()
             ], 500);
         }
