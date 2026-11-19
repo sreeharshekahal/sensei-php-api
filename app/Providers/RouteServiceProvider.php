@@ -10,14 +10,14 @@ class RouteServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->routes(function () {
-            // Load API routes
+            // Load API routes with /api prefix (e.g. /api/rest-auth/login)
             Route::prefix('api')
                 ->middleware('api')
                 ->group(base_path('routes/api.php'));
 
-            // // Load Web routes
-            // Route::middleware('web')
-            //     ->group(base_path('routes/web.php'));
+            // Also load API routes without prefix for Django compatibility (e.g. /rest-auth/login)
+            Route::middleware('api')
+                ->group(base_path('routes/api.php'));
         });
     }
 }
