@@ -39,6 +39,7 @@ Route::middleware('auth.token')->group(function () {
     Route::patch('/rest-auth/user', [AuthController::class, 'updateUser']);
     Route::post('/rest-auth/password/change', [AuthController::class, 'changePassword']);
 
+    // User Role Accounts
     Route::get('/user-role-accounts', [UserRoleAccountController::class, 'index']);
     Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
     Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show']);
@@ -46,6 +47,7 @@ Route::middleware('auth.token')->group(function () {
     Route::delete('/user-role-accounts/{id}', [UserRoleAccountController::class, 'destroy']);
     Route::post('/user-role-accounts/bulk_delete', [UserRoleAccountController::class, 'bulkDelete']);
 
+    // Attachments
     Route::post('/attachments', [AttachmentController::class, 'store']);
 
     // Groups & Members
