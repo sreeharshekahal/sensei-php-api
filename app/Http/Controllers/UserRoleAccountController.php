@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AuthUser;
 use App\Models\UserRoleAccount;
+use App\Services\DjangoPasswordHasher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -43,7 +44,7 @@ class UserRoleAccountController extends Controller
                 $plainPassword = Str::random(12);
                 $sendSetPasswordEmail = true;
             }
-            $hashedPassword = $this->make_pbkdf2_sha256($plainPassword);
+            $hashedPassword = DjangoPasswordHasher::make($plainPassword);
 
             // 3️⃣ Create Core User inside 'auth_user'
             $user = AuthUser::create([
@@ -108,17 +109,6 @@ class UserRoleAccountController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
-    }
-
-    /**
-     * Custom Django-compatible PBKDF2-SHA256 hash
-     */
-    private function make_pbkdf2_sha256(string $password, int $iterations = 36000, int $length = 32): string
-    {
-        $salt = base64_encode(random_bytes(12));
-        $hash = base64_encode(hash_pbkdf2('sha256', $password, $salt, $iterations, $length, true));
-
-        return "pbkdf2_sha256$$iterations$$salt$$hash";
     }
 
     /**
@@ -554,7 +544,7 @@ class UserRoleAccountController extends Controller
                 $userUpdateData['last_name'] = $userData['last_name'];
             }
             if ($request->has('profile.user.password') && !empty($userData['password'])) {
-                $userUpdateData['password'] = $this->make_pbkdf2_sha256($userData['password']);
+                $userUpdateData['password'] = DjangoPasswordHasher::make($userData['password']);
             }
 
             if (!empty($userUpdateData)) {
