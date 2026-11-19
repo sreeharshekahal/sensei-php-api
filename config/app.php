@@ -123,4 +123,6 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'django_secret_key' => env('DJANGO_SECRET_KEY', ''),
+
 ];
