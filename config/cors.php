@@ -8,12 +8,15 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*', 'rest-auth/*', '*'],
 
     'allowed_methods' => ['*'],
 
-    // 🟢 Allows any website/domain to call your API
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'http://localhost:8080',
+        'http://127.0.0.1:8080',
+        env('FRONTEND_URL', 'http://localhost:8080'),
+    ],
 
     'allowed_origins_patterns' => [],
 
@@ -23,7 +26,6 @@ return [
 
     'max_age' => 0,
 
-    // 🛑 CRITICAL: Must be false when allowed_origins is '*'
-    'supports_credentials' => false,
+    'supports_credentials' => true,
 
 ];
