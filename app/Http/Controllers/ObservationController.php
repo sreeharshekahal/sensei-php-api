@@ -5,11 +5,12 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ObservationController extends Controller
 {
     /**
-     * List observations visible to user, with optional group filter and pagination.
+     * List observations visible to user, with filters and pagination.
      */
     public function index(Request $request)
     {
@@ -37,30 +38,69 @@ class ObservationController extends Controller
                 ->leftJoin('rubrics_rubric as rub', 'o.rubric_id', '=', 'rub.id')
                 ->leftJoin('observations_ratingscheme as rs', 'rub.rating_scheme_id', '=', 'rs.id');
 
-            $query->where(function ($q) use ($user, $ura, $userGroupIds) {
-                $q->where('observer_ura.user_id', $user->id)
-                  ->orWhere('observee_ura.user_id', $user->id);
+            if ((int)$ura->rank > 1) {
+                $query->where(function ($q) use ($user, $ura, $userGroupIds) {
+                    $q->where('observer_ura.user_id', $user->id)
+                      ->orWhere('observee_ura.user_id', $user->id);
 
-                if (!empty($userGroupIds)) {
-                    $q->orWhere(function ($sub) use ($ura, $userGroupIds) {
-                        $sub->where('observee_role.rank', '>=', $ura->rank)
-                            ->whereExists(function ($pivot) use ($userGroupIds) {
-                                $pivot->select(DB::raw(1))
-                                      ->from('access_group_users as gu')
-                                      ->whereColumn('gu.userroleaccount_id', 'observee_ura.id')
-                                      ->whereIn('gu.group_id', $userGroupIds);
-                            });
-                    });
-                }
-            });
+                    if (!empty($userGroupIds)) {
+                        $q->orWhere(function ($sub) use ($ura, $userGroupIds) {
+                            $sub->where('observee_role.rank', '>=', $ura->rank)
+                                ->whereExists(function ($pivot) use ($userGroupIds) {
+                                    $pivot->select(DB::raw(1))
+                                          ->from('access_group_users as gu')
+                                          ->whereColumn('gu.userroleaccount_id', 'observee_ura.id')
+                                          ->whereIn('gu.group_id', $userGroupIds);
+                                });
+                        });
+                    }
+                });
+            }
 
             if ($request->filled('group')) {
-                $query->where('o.group_id', $request->query('group'));
+                $groupIds = array_filter(explode(',', $request->query('group')), fn ($gid) => Str::isUuid($gid));
+                if (count($groupIds) > 1) {
+                    $query->whereIn('o.group_id', $groupIds);
+                } elseif (count($groupIds) === 1) {
+                    $query->where('o.group_id', reset($groupIds));
+                }
+            }
+
+            if ($request->filled('observee') && Str::isUuid($request->query('observee'))) {
+                $query->where('o.observee_id', $request->query('observee'));
+            }
+
+            if ($request->filled('observer') && Str::isUuid($request->query('observer'))) {
+                $query->where('o.observer_id', $request->query('observer'));
+            }
+
+            if ($request->filled('of') && Str::isUuid($request->query('of'))) {
+                $of = $request->query('of');
+                $query->where(function ($q) use ($of) {
+                    $q->where('o.observer_id', $of)
+                      ->orWhere('o.observee_id', $of);
+                });
             }
 
             if ($request->filled('is_published')) {
                 $isPublished = filter_var($request->query('is_published'), FILTER_VALIDATE_BOOLEAN);
                 $query->where('o.is_published', $isPublished);
+            }
+
+            if ($request->filled('is_observers_learning')) {
+                $isLearning = filter_var($request->query('is_observers_learning'), FILTER_VALIDATE_BOOLEAN);
+                $query->whereExists(function ($sub) use ($isLearning) {
+                    $sub->select(DB::raw(1))
+                        ->from('observations_evidence as e')
+                        ->whereColumn('e.observation_id', 'o.id')
+                        ->where('e.is_observers_learning', $isLearning);
+                });
+            }
+
+            if ($request->filled('account')) {
+                $accountId = $request->query('account');
+                $query->join('access_group as ag_acc', 'o.group_id', '=', 'ag_acc.id')
+                      ->where('ag_acc.account_id', $accountId);
             }
 
             $total = $query->distinct()->count('o.id');
@@ -72,6 +112,14 @@ class ObservationController extends Controller
             if ($request->filled('page') && !$request->filled('offset')) {
                 $page = max(1, (int)$request->query('page'));
                 $offset = ($page - 1) * $limit;
+            }
+
+            $ordering = $request->query('ordering', '-created');
+            $orderDirection = str_starts_with($ordering, '-') ? 'desc' : 'asc';
+            $orderField = ltrim($ordering, '-');
+            if (!in_array($orderField, ['created', 'updated', 'title'])) {
+                $orderField = 'created';
+                $orderDirection = 'desc';
             }
 
             $observations = $query->select([
@@ -88,7 +136,7 @@ class ObservationController extends Controller
                     'rs.code as rating_scheme_code',
                 ])
                 ->distinct()
-                ->orderBy('o.created', 'desc')
+                ->orderBy("o.{$orderField}", $orderDirection)
                 ->offset($offset)
                 ->limit($limit)
                 ->get();
@@ -105,6 +153,166 @@ class ObservationController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to retrieve observations.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Fetch full observation details by ID.
+     */
+    public function show(Request $request, string $id)
+    {
+        try {
+            if (empty($id) || !Str::isUuid($id)) {
+                return response()->json(['detail' => 'Observation not found.'], 404);
+            }
+            $user = $request->user();
+            $ura = DB::table('access_userroleaccount as ura')
+                ->join('access_role as r', 'ura.role_id', '=', 'r.id')
+                ->where('ura.user_id', $user->id)
+                ->select('ura.id as ura_id', 'r.rank')
+                ->first();
+
+            if (!$ura) {
+                return response()->json(['detail' => 'User role account not found.'], 404);
+            }
+
+            $obs = DB::table('observations_observation as o')
+                ->leftJoin('rubrics_rubric as rub', 'o.rubric_id', '=', 'rub.id')
+                ->leftJoin('observations_ratingscheme as rs', 'rub.rating_scheme_id', '=', 'rs.id')
+                ->where('o.id', $id)
+                ->select([
+                    'o.id',
+                    'o.title',
+                    'o.description',
+                    'o.group_id',
+                    'o.observer_id',
+                    'o.observee_id',
+                    'o.rubric_id',
+                    'o.is_published',
+                    'o.created',
+                    'o.updated',
+                    'rs.title as rating_scheme_title',
+                    'rs.code as rating_scheme_code',
+                    'rub.rating_scheme_id',
+                ])
+                ->first();
+
+            if (!$obs) {
+                return response()->json(['detail' => 'Observation not found.'], 404);
+            }
+
+            if ((int)$ura->rank > 1 && $obs->observer_id !== $ura->ura_id && $obs->observee_id !== $ura->ura_id) {
+                $userGroupIds = DB::table('access_group_users')
+                    ->where('userroleaccount_id', $ura->ura_id)
+                    ->pluck('group_id')
+                    ->toArray();
+
+                $observeeRank = DB::table('access_userroleaccount as ura')
+                    ->join('access_role as r', 'ura.role_id', '=', 'r.id')
+                    ->where('ura.id', $obs->observee_id)
+                    ->value('r.rank');
+
+                $sharedGroup = DB::table('access_group_users')
+                    ->where('userroleaccount_id', $obs->observee_id)
+                    ->whereIn('group_id', $userGroupIds)
+                    ->exists();
+
+                if (!($observeeRank !== null && $observeeRank >= (int)$ura->rank && $sharedGroup)) {
+                    return response()->json(['detail' => 'You do not have permission to view this observation.'], 403);
+                }
+            }
+
+            $formatted = $this->formatObservations(collect([$obs]), $request);
+            $data = $formatted[0] ?? [];
+
+            $indicatorsCount = (int) DB::table('observations_indicatorrating as ir')
+                ->join('observations_evidence as e', 'ir.evidence_id', '=', 'e.id')
+                ->where('e.observation_id', $obs->id)
+                ->count('ir.id');
+
+            $indicatorRatings = DB::table('observations_indicatorrating as ir')
+                ->join('observations_evidence as e', 'ir.evidence_id', '=', 'e.id')
+                ->join('rubrics_indicator as ind', 'ir.indicator_id', '=', 'ind.id')
+                ->join('observations_rating as r', 'ir.rating_id', '=', 'r.id')
+                ->where('e.observation_id', $obs->id)
+                ->select([
+                    'ir.id',
+                    'ir.indicator_id as indicator',
+                    'ind.title as indicator_title',
+                    'ir.rating_id as rating',
+                    'r.score as rating_score',
+                    'r.title as rating_title',
+                ])
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id'              => $row->id,
+                        'indicator'       => $row->indicator,
+                        'indicator_title' => $row->indicator_title,
+                        'rating'          => $row->rating,
+                        'rating_score'    => (string)$row->rating_score,
+                        'rating_title'    => $row->rating_title,
+                    ];
+                })
+                ->toArray();
+
+            $totalIndicatorsCount = (int) DB::table('rubrics_indicator as ind')
+                ->join('rubrics_subproposition as sub', 'ind.subproposition_id', '=', 'sub.id')
+                ->join('rubrics_proposition as prop', 'sub.proposition_id', '=', 'prop.id')
+                ->where('prop.rubric_id', $obs->rubric_id)
+                ->count('ind.id');
+
+            $maxRatingScore = DB::table('observations_rating')
+                ->where('rating_scheme_id', $obs->rating_scheme_id)
+                ->max('score');
+
+            $avgScore = DB::table('observations_indicatorrating as ir')
+                ->join('observations_evidence as e', 'ir.evidence_id', '=', 'e.id')
+                ->join('observations_rating as r', 'ir.rating_id', '=', 'r.id')
+                ->where('e.observation_id', $obs->id)
+                ->avg('r.score');
+
+            $avgRatingScore = $avgScore !== null ? (float)$avgScore : null;
+
+            $diffSincePrevious = null;
+            if ($avgRatingScore !== null) {
+                $prevObs = DB::table('observations_observation')
+                    ->where('group_id', $obs->group_id)
+                    ->where('observee_id', $obs->observee_id)
+                    ->where('created', '<', $obs->created)
+                    ->orderBy('created', 'desc')
+                    ->first();
+
+                if ($prevObs) {
+                    $prevAvg = DB::table('observations_indicatorrating as ir')
+                        ->join('observations_evidence as e', 'ir.evidence_id', '=', 'e.id')
+                        ->join('observations_rating as r', 'ir.rating_id', '=', 'r.id')
+                        ->where('e.observation_id', $prevObs->id)
+                        ->avg('r.score');
+
+                    if ($prevAvg !== null) {
+                        $diffSincePrevious = round($avgRatingScore - (float)$prevAvg, 2);
+                    }
+                } else {
+                    $diffSincePrevious = 0.0;
+                }
+            }
+
+            $data['description'] = $obs->description ?? '';
+            $data['indicators_count'] = $indicatorsCount;
+            $data['indicators_rating'] = $indicatorRatings;
+            $data['total_indicators_count'] = $totalIndicatorsCount;
+            $data['max_rating_score'] = $maxRatingScore !== null ? (int)$maxRatingScore : null;
+            $data['avg_rating_score'] = $avgRatingScore !== null ? round($avgRatingScore, 2) : null;
+            $data['diff_since_previous_observation'] = $diffSincePrevious;
+
+            return response()->json($data, 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to retrieve observation details.',
                 'details' => $e->getMessage()
             ], 500);
         }

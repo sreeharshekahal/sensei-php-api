@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GroupController;
+use App\Http\Controllers\IndicatorController;
 use App\Http\Controllers\ObservationController;
 use App\Http\Controllers\ObservationStatsController;
 use App\Http\Controllers\UserRoleAccountController;
@@ -58,6 +60,15 @@ Route::middleware('auth.token')->group(function () {
 
     // Observations
     Route::get('/observations', [ObservationController::class, 'index']);
+    Route::get('/observations/{id}', [ObservationController::class, 'show']);
+    Route::get('/observations/{observationId}/evidences', [EvidenceController::class, 'observationEvidences']);
+    Route::post('/observations/{observationId}/evidences', [EvidenceController::class, 'storeObservationEvidence']);
+
+    // Evidences
+    Route::get('/evidences', [EvidenceController::class, 'index']);
+
+    // Indicators
+    Route::get('/indicators', [IndicatorController::class, 'index']);
 
     // User Observation Statistics
     Route::get('/user-stats', [UserStatsController::class, 'index']);
