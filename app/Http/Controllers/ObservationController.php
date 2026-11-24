@@ -33,7 +33,9 @@ class ObservationController extends Controller
 
             $query = DB::table('observations_observation as o')
                 ->join('access_userroleaccount as observer_ura', 'o.observer_id', '=', 'observer_ura.id')
+                ->join('auth_user as observer_u', 'observer_ura.user_id', '=', 'observer_u.id')
                 ->join('access_userroleaccount as observee_ura', 'o.observee_id', '=', 'observee_ura.id')
+                ->join('auth_user as observee_u', 'observee_ura.user_id', '=', 'observee_u.id')
                 ->join('access_role as observee_role', 'observee_ura.role_id', '=', 'observee_role.id')
                 ->leftJoin('rubrics_rubric as rub', 'o.rubric_id', '=', 'rub.id')
                 ->leftJoin('observations_ratingscheme as rs', 'rub.rating_scheme_id', '=', 'rs.id');
@@ -41,16 +43,16 @@ class ObservationController extends Controller
             if ((int)$ura->rank > 1) {
                 $query->where(function ($q) use ($user, $ura, $userGroupIds) {
                     $q->where('observer_ura.user_id', $user->id)
-                      ->orWhere('observee_ura.user_id', $user->id);
+                        ->orWhere('observee_ura.user_id', $user->id);
 
                     if (!empty($userGroupIds)) {
                         $q->orWhere(function ($sub) use ($ura, $userGroupIds) {
                             $sub->where('observee_role.rank', '>=', $ura->rank)
                                 ->whereExists(function ($pivot) use ($userGroupIds) {
                                     $pivot->select(DB::raw(1))
-                                          ->from('access_group_users as gu')
-                                          ->whereColumn('gu.userroleaccount_id', 'observee_ura.id')
-                                          ->whereIn('gu.group_id', $userGroupIds);
+                                        ->from('access_group_users as gu')
+                                        ->whereColumn('gu.userroleaccount_id', 'observee_ura.id')
+                                        ->whereIn('gu.group_id', $userGroupIds);
                                 });
                         });
                     }
@@ -58,7 +60,7 @@ class ObservationController extends Controller
             }
 
             if ($request->filled('group')) {
-                $groupIds = array_filter(explode(',', $request->query('group')), fn ($gid) => Str::isUuid($gid));
+                $groupIds = array_filter(explode(',', $request->input('group')), fn($gid) => Str::isUuid($gid));
                 if (count($groupIds) > 1) {
                     $query->whereIn('o.group_id', $groupIds);
                 } elseif (count($groupIds) === 1) {
@@ -66,55 +68,69 @@ class ObservationController extends Controller
                 }
             }
 
-            if ($request->filled('observee') && Str::isUuid($request->query('observee'))) {
-                $query->where('o.observee_id', $request->query('observee'));
+            if ($request->filled('observee') && Str::isUuid($request->input('observee'))) {
+                $query->where('o.observee_id', $request->input('observee'));
             }
 
-            if ($request->filled('observer') && Str::isUuid($request->query('observer'))) {
-                $query->where('o.observer_id', $request->query('observer'));
+            if ($request->filled('observer') && Str::isUuid($request->input('observer'))) {
+                $query->where('o.observer_id', $request->input('observer'));
             }
 
-            if ($request->filled('of') && Str::isUuid($request->query('of'))) {
-                $of = $request->query('of');
+            if ($request->filled('observee__user__username')) {
+                $query->where('observee_u.username', $request->input('observee__user__username'));
+            }
+
+            if ($request->filled('observer__user__username')) {
+                $query->where('observer_u.username', $request->input('observer__user__username'));
+            }
+
+            if ($request->filled('of') && Str::isUuid($request->input('of'))) {
+                $of = $request->input('of');
                 $query->where(function ($q) use ($of) {
                     $q->where('o.observer_id', $of)
-                      ->orWhere('o.observee_id', $of);
+                        ->orWhere('o.observee_id', $of);
                 });
             }
 
-            if ($request->filled('is_published')) {
-                $isPublished = filter_var($request->query('is_published'), FILTER_VALIDATE_BOOLEAN);
-                $query->where('o.is_published', $isPublished);
+            if ($request->has('is_published')) {
+                $val = $request->input('is_published');
+                if ($val !== null && $val !== '') {
+                    $isPublished = filter_var($val, FILTER_VALIDATE_BOOLEAN);
+                    $query->where('o.is_published', $isPublished);
+                }
             }
 
-            if ($request->filled('is_observers_learning')) {
-                $isLearning = filter_var($request->query('is_observers_learning'), FILTER_VALIDATE_BOOLEAN);
-                $query->whereExists(function ($sub) use ($isLearning) {
-                    $sub->select(DB::raw(1))
-                        ->from('observations_evidence as e')
-                        ->whereColumn('e.observation_id', 'o.id')
-                        ->where('e.is_observers_learning', $isLearning);
-                });
+            if ($request->has('is_observers_learning')) {
+                $val = $request->input('is_observers_learning');
+                if ($val !== null && $val !== '') {
+                    $isLearning = filter_var($val, FILTER_VALIDATE_BOOLEAN);
+                    $query->whereExists(function ($sub) use ($isLearning) {
+                        $sub->select(DB::raw(1))
+                            ->from('observations_evidence as e')
+                            ->whereColumn('e.observation_id', 'o.id')
+                            ->where('e.is_observers_learning', $isLearning);
+                    });
+                }
             }
 
             if ($request->filled('account')) {
-                $accountId = $request->query('account');
+                $accountId = $request->input('account');
                 $query->join('access_group as ag_acc', 'o.group_id', '=', 'ag_acc.id')
-                      ->where('ag_acc.account_id', $accountId);
+                    ->where('ag_acc.account_id', $accountId);
             }
 
             $total = $query->distinct()->count('o.id');
 
-            $limit = (int)$request->query('limit', $request->query('page_size', 10));
+            $limit = (int)$request->input('limit', $request->input('page_size', 10));
             $limit = max(1, min($limit, 1000));
 
-            $offset = (int)$request->query('offset', 0);
-            if ($request->filled('page') && !$request->filled('offset')) {
-                $page = max(1, (int)$request->query('page'));
+            $offset = (int)$request->input('offset', 0);
+            if ($request->filled('page') && !$request->has('offset')) {
+                $page = max(1, (int)$request->input('page'));
                 $offset = ($page - 1) * $limit;
             }
 
-            $ordering = $request->query('ordering', '-created');
+            $ordering = $request->input('ordering', '-created');
             $orderDirection = str_starts_with($ordering, '-') ? 'desc' : 'asc';
             $orderField = ltrim($ordering, '-');
             if (!in_array($orderField, ['created', 'updated', 'title'])) {
@@ -123,18 +139,19 @@ class ObservationController extends Controller
             }
 
             $observations = $query->select([
-                    'o.id',
-                    'o.title',
-                    'o.group_id',
-                    'o.observer_id',
-                    'o.observee_id',
-                    'o.rubric_id',
-                    'o.is_published',
-                    'o.created',
-                    'o.updated',
-                    'rs.title as rating_scheme_title',
-                    'rs.code as rating_scheme_code',
-                ])
+                'o.id',
+                'o.title',
+                'o.description',
+                'o.group_id',
+                'o.observer_id',
+                'o.observee_id',
+                'o.rubric_id',
+                'o.is_published',
+                'o.created',
+                'o.updated',
+                'rs.title as rating_scheme_title',
+                'rs.code as rating_scheme_code',
+            ])
                 ->distinct()
                 ->orderBy("o.{$orderField}", $orderDirection)
                 ->offset($offset)
@@ -149,7 +166,6 @@ class ObservationController extends Controller
                 'previous' => $this->buildPrevUrl($request, $offset, $limit),
                 'results'  => $results,
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to retrieve observations.',
@@ -225,7 +241,7 @@ class ObservationController extends Controller
             }
 
             $formatted = $this->formatObservations(collect([$obs]), $request);
-            $data = $formatted[0] ?? [];
+            $base = $formatted[0] ?? [];
 
             $indicatorsCount = (int) DB::table('observations_indicatorrating as ir')
                 ->join('observations_evidence as e', 'ir.evidence_id', '=', 'e.id')
@@ -248,12 +264,12 @@ class ObservationController extends Controller
                 ->get()
                 ->map(function ($row) {
                     return [
-                        'id'              => $row->id,
-                        'indicator'       => $row->indicator,
-                        'indicator_title' => $row->indicator_title,
-                        'rating'          => $row->rating,
+                        'id'              => (int)$row->id,
                         'rating_score'    => (string)$row->rating_score,
-                        'rating_title'    => $row->rating_title,
+                        'rating_title'    => (string)$row->rating_title,
+                        'indicator_title' => $row->indicator_title,
+                        'indicator'       => $row->indicator,
+                        'rating'          => $row->rating,
                     ];
                 })
                 ->toArray();
@@ -293,23 +309,37 @@ class ObservationController extends Controller
                         ->avg('r.score');
 
                     if ($prevAvg !== null) {
-                        $diffSincePrevious = round($avgRatingScore - (float)$prevAvg, 2);
+                        $diffSincePrevious = (float)($avgRatingScore - (float)$prevAvg);
                     }
                 } else {
-                    $diffSincePrevious = 0.0;
+                    $diffSincePrevious = (float)$avgRatingScore;
                 }
             }
 
-            $data['description'] = $obs->description ?? '';
-            $data['indicators_count'] = $indicatorsCount;
-            $data['indicators_rating'] = $indicatorRatings;
-            $data['total_indicators_count'] = $totalIndicatorsCount;
-            $data['max_rating_score'] = $maxRatingScore !== null ? (int)$maxRatingScore : null;
-            $data['avg_rating_score'] = $avgRatingScore !== null ? round($avgRatingScore, 2) : null;
-            $data['diff_since_previous_observation'] = $diffSincePrevious;
+            $response = [
+                'id'                              => $base['id'],
+                'observer'                        => $base['observer'] ?? null,
+                'observee'                        => $base['observee'] ?? null,
+                'rating_scheme_title'             => $base['rating_scheme_title'] ?? null,
+                'rating_scheme_code'              => $base['rating_scheme_code'] ?? null,
+                'group'                           => $base['group'] ?? null,
+                'evidences_count'                 => $base['evidences_count'] ?? 0,
+                'evidences_url'                   => $base['evidences_url'] ?? null,
+                'indicators_count'                => $indicatorsCount,
+                'indicators_rating'               => $indicatorRatings,
+                'total_indicators_count'          => $totalIndicatorsCount,
+                'max_rating_score'                => $maxRatingScore !== null ? (int)$maxRatingScore : null,
+                'avg_rating_score'                => $avgRatingScore,
+                'diff_since_previous_observation' => $diffSincePrevious,
+                'created'                         => $base['created'] ?? null,
+                'updated'                         => $base['updated'] ?? null,
+                'title'                           => $base['title'] ?? null,
+                'description'                     => $obs->description ?? null,
+                'is_published'                    => $base['is_published'] ?? false,
+                'rubric'                          => $base['rubric'] ?? null,
+            ];
 
-            return response()->json($data, 200);
-
+            return response()->json($response, 200);
         } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to retrieve observation details.',
@@ -334,6 +364,7 @@ class ObservationController extends Controller
 
         $groupsData = DB::table('access_group as g')
             ->leftJoin('rubrics_rubric as r', 'g.rubric_id', '=', 'r.id')
+            ->leftJoin('observations_ratingscheme as rs', 'r.rating_scheme_id', '=', 'rs.id')
             ->leftJoin('access_userroleaccount as ura', 'g.created_by_id', '=', 'ura.id')
             ->leftJoin('auth_user as u', 'ura.user_id', '=', 'u.id')
             ->whereIn('g.id', $groupIds)
@@ -344,6 +375,13 @@ class ObservationController extends Controller
                 'u.username as created_by',
                 'r.id as rubric_id',
                 'r.title as rubric_title',
+                'r.description as rubric_description',
+                'r.rating_scheme_id as rubric_rating_scheme',
+                'r.account_id as rubric_account',
+                'r.updated as rubric_updated',
+                'rs.title as rubric_rating_scheme_title',
+                'rs.code as rubric_rating_scheme_code',
+                'rs.is_input_required as rubric_is_input_required',
             ])
             ->get()
             ->keyBy('id');
@@ -360,40 +398,51 @@ class ObservationController extends Controller
             ->groupBy('observation_id')
             ->pluck('cnt', 'observation_id');
 
-        $baseUrl = $request->root();
+        $schemeAndHost = $request->getSchemeAndHttpHost();
 
-        return $observations->map(function ($o) use ($groupsData, $groupUserCounts, $formattedUras, $evidenceCounts, $baseUrl) {
+        return $observations->map(function ($o) use ($groupsData, $groupUserCounts, $formattedUras, $evidenceCounts, $schemeAndHost) {
             $g = $groupsData->get($o->group_id);
             $groupObj = null;
 
             if ($g) {
+                $rubricObj = $g->rubric_id ? [
+                    'id'                  => $g->rubric_id,
+                    'indicator_url'       => "{$schemeAndHost}/v1/indicators?rubric={$g->rubric_id}",
+                    'rating_scheme_title' => $g->rubric_rating_scheme_title,
+                    'rating_scheme_code'  => $g->rubric_rating_scheme_code,
+                    'is_input_required'   => (bool)$g->rubric_is_input_required,
+                    'updated'             => $g->rubric_updated ? Carbon::parse($g->rubric_updated)->toJSON() : null,
+                    'title'               => $g->rubric_title,
+                    'description'         => $g->rubric_description ?? '',
+                    'account'             => $g->rubric_account,
+                    'rating_scheme'       => $g->rubric_rating_scheme,
+                ] : null;
+
                 $groupObj = [
                     'id'          => $g->id,
-                    'title'       => $g->title,
-                    'description' => $g->description,
                     'users_count' => (int)($groupUserCounts[$g->id] ?? 0),
                     'created_by'  => $g->created_by,
-                    'rubric'      => $g->rubric_id ? ['id' => $g->rubric_id, 'title' => $g->rubric_title] : null,
+                    'rubric'      => $rubricObj,
+                    'title'       => $g->title,
+                    'description' => $g->description ?? '',
                 ];
             }
 
             return [
                 'id'                  => $o->id,
-                'title'               => $o->title,
-                'group'               => $groupObj,
-                'group_id'            => $o->group_id,
                 'observer'            => $formattedUras[$o->observer_id] ?? null,
-                'observer_id'         => $o->observer_id,
                 'observee'            => $formattedUras[$o->observee_id] ?? null,
-                'observee_id'         => $o->observee_id,
-                'rubric_id'           => $o->rubric_id,
-                'is_published'        => (bool)$o->is_published,
                 'rating_scheme_title' => $o->rating_scheme_title,
                 'rating_scheme_code'  => $o->rating_scheme_code,
+                'group'               => $groupObj,
                 'evidences_count'     => (int)($evidenceCounts[$o->id] ?? 0),
-                'evidences_url'       => "{$baseUrl}/api/v1/observations/{$o->id}/evidences/",
+                'evidences_url'       => "{$schemeAndHost}/v1/observations/{$o->id}/evidences/",
                 'created'             => $o->created ? Carbon::parse($o->created)->toJSON() : null,
                 'updated'             => $o->updated ? Carbon::parse($o->updated)->toJSON() : null,
+                'title'               => $o->title,
+                'description'         => $o->description ?? null,
+                'is_published'        => (bool)$o->is_published,
+                'rubric'              => $o->rubric_id,
             ];
         })->toArray();
     }
@@ -437,7 +486,7 @@ class ObservationController extends Controller
             ->select('userroleaccount_id', 'group_id')
             ->get()
             ->groupBy('userroleaccount_id')
-            ->map(fn ($items) => $items->pluck('group_id')->toArray())
+            ->map(fn($items) => $items->pluck('group_id')->toArray())
             ->toArray();
 
         $formatted = [];
@@ -468,7 +517,7 @@ class ObservationController extends Controller
                 ],
                 'created' => !empty($item->profile_created) ? Carbon::parse($item->profile_created)->toJSON() : null,
                 'updated' => !empty($item->profile_updated) ? Carbon::parse($item->profile_updated)->toJSON() : null,
-                'phone' => $item->phone ?? null,
+                'phone' => !empty($item->phone) ? (string)$item->phone : '',
                 'designation' => $item->designation ?? null,
                 'dob' => $item->dob ?? null,
             ],
@@ -491,7 +540,20 @@ class ObservationController extends Controller
     private function buildPrevUrl(Request $request, int $offset, int $limit): ?string
     {
         if ($offset > 0) {
-            return $request->fullUrlWithQuery(['offset' => max(0, $offset - $limit), 'limit' => $limit]);
+            $prevOffset = $offset - $limit;
+            if ($prevOffset <= 0) {
+                $url = $request->fullUrlWithQuery(['limit' => $limit]);
+                $parsed = parse_url($url);
+                parse_str($parsed['query'] ?? '', $queryParams);
+                unset($queryParams['offset']);
+                $newQuery = http_build_query($queryParams);
+                $scheme = $parsed['scheme'] ?? 'http';
+                $host = $parsed['host'] ?? '';
+                $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+                $path = $parsed['path'] ?? '';
+                return $scheme . '://' . $host . $port . $path . ($newQuery ? '?' . $newQuery : '');
+            }
+            return $request->fullUrlWithQuery(['offset' => $prevOffset, 'limit' => $limit]);
         }
         return null;
     }

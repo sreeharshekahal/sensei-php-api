@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class GroupController extends Controller
 {
@@ -80,6 +81,10 @@ class GroupController extends Controller
     public function show(string $id)
     {
         try {
+            if (empty($id) || !Str::isUuid($id)) {
+                return response()->json(['detail' => 'Not found.'], 404);
+            }
+
             $group = DB::table('access_group')->where('id', $id)->first();
 
             if (!$group) {
@@ -104,6 +109,10 @@ class GroupController extends Controller
     public function users(string $id)
     {
         try {
+            if (empty($id) || !Str::isUuid($id)) {
+                return response()->json(['detail' => 'Not found.'], 404);
+            }
+
             $groupExists = DB::table('access_group')->where('id', $id)->exists();
 
             if (!$groupExists) {
@@ -209,12 +218,12 @@ class GroupController extends Controller
             $results = $groups->map(function ($g) use ($groupMembersMap) {
                 return [
                     'id'          => $g->id,
+                    'members'     => $groupMembersMap[$g->id] ?? [],
                     'title'       => $g->title,
                     'description' => $g->description,
-                    'account_id'  => $g->account_id,
-                    'rubric_id'   => $g->rubric_id,
+                    'account'     => $g->account_id,
                     'created_by'  => $g->created_by_id,
-                    'members'     => $groupMembersMap[$g->id] ?? [],
+                    'rubric'      => $g->rubric_id,
                 ];
             })->toArray();
 
@@ -258,18 +267,36 @@ class GroupController extends Controller
             ->get()
             ->keyBy('id');
 
-        $rubricsMap = DB::table('rubrics_rubric')
-            ->whereIn('id', $rubricIds)
+        $rubricsMap = DB::table('rubrics_rubric as rub')
+            ->leftJoin('observations_ratingscheme as rs', 'rub.rating_scheme_id', '=', 'rs.id')
+            ->whereIn('rub.id', $rubricIds)
+            ->select([
+                'rub.id',
+                'rub.title',
+                'rub.description',
+                'rub.rating_scheme_id as rating_scheme',
+                'rub.account_id as account',
+                'rub.updated',
+                'rs.title as rating_scheme_title',
+                'rs.code as rating_scheme_code',
+                'rs.is_input_required',
+            ])
             ->get()
             ->keyBy('id');
 
         $creatorsMap = $this->fetchFormattedUras($creatorUraIds);
 
-        $usersCounts = DB::table('access_group_users')
+        $groupUsers = DB::table('access_group_users')
             ->whereIn('group_id', $groupIds)
-            ->select('group_id', DB::raw('COUNT(DISTINCT userroleaccount_id) as cnt'))
-            ->groupBy('group_id')
-            ->pluck('cnt', 'group_id');
+            ->select('group_id', 'userroleaccount_id')
+            ->get();
+
+        $groupUsersMap = [];
+        $usersCounts = [];
+        foreach ($groupUsers as $gu) {
+            $groupUsersMap[$gu->group_id][] = $gu->userroleaccount_id;
+            $usersCounts[$gu->group_id] = ($usersCounts[$gu->group_id] ?? 0) + 1;
+        }
 
         $obsCounts = DB::table('observations_observation')
             ->whereIn('group_id', $groupIds)
@@ -278,17 +305,47 @@ class GroupController extends Controller
             ->groupBy('group_id')
             ->pluck('cnt', 'group_id');
 
-        return $groups->map(function ($g) use ($accountsMap, $rubricsMap, $creatorsMap, $usersCounts, $obsCounts) {
+        $baseUrl = request()->root();
+
+        return $groups->map(function ($g) use ($accountsMap, $rubricsMap, $creatorsMap, $groupUsersMap, $usersCounts, $obsCounts, $baseUrl) {
             $account = $accountsMap->get($g->account_id);
             $rubric = $rubricsMap->get($g->rubric_id);
+
+            $accountObj = null;
+            if ($account) {
+                $accountObj = [
+                    'id'          => $account->id,
+                    'title'       => $account->title,
+                    'description' => $account->description ?? '',
+                    'logo'        => $account->logo_id ?? null,
+                    'app_url'     => $account->app_url ?? '',
+                ];
+            }
+
+            $rubricObj = null;
+            if ($rubric) {
+                $rubricObj = [
+                    'id'                  => $rubric->id,
+                    'title'               => $rubric->title,
+                    'description'         => $rubric->description ?? '',
+                    'updated'             => $rubric->updated ? Carbon::parse($rubric->updated)->toJSON() : null,
+                    'rating_scheme'       => $rubric->rating_scheme,
+                    'account'             => $rubric->account,
+                    'rating_scheme_title' => $rubric->rating_scheme_title,
+                    'rating_scheme_code'  => $rubric->rating_scheme_code,
+                    'is_input_required'   => (bool)$rubric->is_input_required,
+                    'indicator_url'       => request()->getSchemeAndHttpHost() . "/v1/indicators?rubric={$rubric->id}",
+                ];
+            }
 
             return [
                 'id'                 => $g->id,
                 'title'              => $g->title,
                 'description'        => $g->description,
-                'account'            => $account ? ['id' => $account->id, 'title' => $account->title] : null,
+                'users'              => $groupUsersMap[$g->id] ?? [],
+                'account'            => $accountObj,
                 'account_id'         => $g->account_id,
-                'rubric'             => $rubric ? ['id' => $rubric->id, 'title' => $rubric->title] : null,
+                'rubric'             => $rubricObj,
                 'rubric_id'          => $g->rubric_id,
                 'created_by'         => $creatorsMap[$g->created_by_id] ?? null,
                 'created_by_id'      => $g->created_by_id,
@@ -369,7 +426,7 @@ class GroupController extends Controller
                 ],
                 'created' => !empty($item->profile_created) ? Carbon::parse($item->profile_created)->toJSON() : null,
                 'updated' => !empty($item->profile_updated) ? Carbon::parse($item->profile_updated)->toJSON() : null,
-                'phone' => $item->phone ?? null,
+                'phone' => !empty($item->phone) ? (string)$item->phone : '',
                 'designation' => $item->designation ?? null,
                 'dob' => $item->dob ?? null,
             ],
@@ -392,7 +449,20 @@ class GroupController extends Controller
     private function buildPrevUrl(Request $request, int $offset, int $limit): ?string
     {
         if ($offset > 0) {
-            return $request->fullUrlWithQuery(['offset' => max(0, $offset - $limit), 'limit' => $limit]);
+            $prevOffset = $offset - $limit;
+            if ($prevOffset <= 0) {
+                $url = $request->fullUrlWithQuery(['limit' => $limit]);
+                $parsed = parse_url($url);
+                parse_str($parsed['query'] ?? '', $queryParams);
+                unset($queryParams['offset']);
+                $newQuery = http_build_query($queryParams);
+                $scheme = $parsed['scheme'] ?? 'http';
+                $host = $parsed['host'] ?? '';
+                $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+                $path = $parsed['path'] ?? '';
+                return $scheme . '://' . $host . $port . $path . ($newQuery ? '?' . $newQuery : '');
+            }
+            return $request->fullUrlWithQuery(['offset' => $prevOffset, 'limit' => $limit]);
         }
         return null;
     }

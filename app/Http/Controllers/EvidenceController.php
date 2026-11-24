@@ -41,6 +41,15 @@ class EvidenceController extends Controller
                 });
             }
 
+            if ($request->filled('group')) {
+                $groupIds = array_filter(explode(',', $request->query('group')), fn($gid) => Str::isUuid($gid));
+                if (count($groupIds) > 1) {
+                    $query->whereIn('o.group_id', $groupIds);
+                } elseif (count($groupIds) === 1) {
+                    $query->where('o.group_id', reset($groupIds));
+                }
+            }
+
             if ($request->filled('is_observers_learning')) {
                 $isLearning = filter_var($request->query('is_observers_learning'), FILTER_VALIDATE_BOOLEAN);
                 $query->where('e.is_observers_learning', $isLearning);
@@ -159,12 +168,12 @@ class EvidenceController extends Controller
 
             $total = $query->count();
 
-            $limit = (int)$request->query('limit', $request->query('page_size', 10));
+            $limit = (int)$request->input('limit', $request->input('page_size', 10));
             $limit = max(1, min($limit, 1000));
 
-            $offset = (int)$request->query('offset', 0);
-            if ($request->filled('page') && !$request->filled('offset')) {
-                $page = max(1, (int)$request->query('page'));
+            $offset = (int)$request->input('offset', 0);
+            if ($request->filled('page') && !$request->has('offset')) {
+                $page = max(1, (int)$request->input('page'));
                 $offset = ($page - 1) * $limit;
             }
 
@@ -349,17 +358,17 @@ class EvidenceController extends Controller
             foreach ($obsRecords as $rec) {
                 $obsMap[$rec->id] = [
                     'id'                  => $rec->id,
-                    'title'               => $rec->title,
-                    'description'         => $rec->description ?? '',
-                    'group'               => $rec->group_id,
-                    'observer'            => $rec->observer_id,
-                    'observee'            => $rec->observee_id,
-                    'rubric'              => $rec->rubric_id,
-                    'is_published'        => (bool)$rec->is_published,
                     'rating_scheme_title' => $rec->rating_scheme_title,
                     'rating_scheme_code'  => $rec->rating_scheme_code,
                     'created'             => $rec->created ? Carbon::parse($rec->created)->toJSON() : null,
                     'updated'             => $rec->updated ? Carbon::parse($rec->updated)->toJSON() : null,
+                    'title'               => $rec->title,
+                    'description'         => $rec->description ?? null,
+                    'is_published'        => (bool)$rec->is_published,
+                    'rubric'              => $rec->rubric_id,
+                    'group'               => $rec->group_id,
+                    'observer'            => $rec->observer_id,
+                    'observee'            => $rec->observee_id,
                 ];
             }
         }
@@ -376,6 +385,7 @@ class EvidenceController extends Controller
                 'a.file_type',
                 'a.size',
                 'a.attachment_type',
+                'a.hash_value',
                 'a.created',
                 'a.updated',
             ])
@@ -393,13 +403,14 @@ class EvidenceController extends Controller
 
             $attachmentsMap[$att->evidence_id][] = [
                 'id'              => $att->id,
-                'name'            => $att->name,
+                'created'         => $att->created ? Carbon::parse($att->created)->toJSON() : null,
+                'updated'         => $att->updated ? Carbon::parse($att->updated)->toJSON() : null,
+                'attachment_type' => $att->attachment_type,
                 'path'            => $path,
                 'file_type'       => $att->file_type,
                 'size'            => $att->size !== null ? (int)$att->size : null,
-                'attachment_type' => $att->attachment_type,
-                'created'         => $att->created ? Carbon::parse($att->created)->toJSON() : null,
-                'updated'         => $att->updated ? Carbon::parse($att->updated)->toJSON() : null,
+                'hash_value'      => $att->hash_value ?? null,
+                'name'            => $att->name,
             ];
         }
 
@@ -421,41 +432,48 @@ class EvidenceController extends Controller
 
         foreach ($ratingRecords as $rat) {
             $ratingsMap[$rat->evidence_id][] = [
-                'id'              => $rat->id,
-                'indicator'       => $rat->indicator,
-                'indicator_title' => $rat->indicator_title,
-                'rating'          => $rat->rating,
+                'id'              => (int)$rat->id,
                 'rating_score'    => (string)$rat->rating_score,
-                'rating_title'    => $rat->rating_title,
+                'rating_title'    => (string)$rat->rating_title,
+                'indicator_title' => $rat->indicator_title,
+                'indicator'       => $rat->indicator,
+                'rating'          => $rat->rating,
             ];
         }
 
         return $evidences->map(function ($e) use ($includeObservationDetails, $obsMap, $attachmentsMap, $ratingsMap) {
             $indicatorRatings = $ratingsMap[$e->id] ?? [];
             $attachmentsDetails = $attachmentsMap[$e->id] ?? [];
+            $attachments = !empty($attachmentsDetails) ? array_values(array_column($attachmentsDetails, 'id')) : [];
 
-            $item = [
+            if ($includeObservationDetails) {
+                return [
+                    'id'                    => $e->id,
+                    'observation_details'   => $obsMap[$e->observation_id] ?? null,
+                    'attachments_details'   => $attachmentsDetails,
+                    'indicator_ratings'     => $indicatorRatings,
+                    'indicators_count'      => count($indicatorRatings),
+                    'created'               => $e->created ? Carbon::parse($e->created)->toJSON() : null,
+                    'updated'               => $e->updated ? Carbon::parse($e->updated)->toJSON() : null,
+                    'title'                 => $e->title,
+                    'description'           => $e->description ?? '',
+                    'is_observers_learning' => (bool)$e->is_observers_learning,
+                    'attachments'           => $attachments,
+                ];
+            }
+
+            return [
                 'id'                    => $e->id,
+                'indicator_ratings'     => $indicatorRatings,
+                'attachments_details'   => $attachmentsDetails,
+                'created'               => $e->created ? Carbon::parse($e->created)->toJSON() : null,
+                'updated'               => $e->updated ? Carbon::parse($e->updated)->toJSON() : null,
                 'title'                 => $e->title,
                 'description'           => $e->description ?? '',
                 'is_observers_learning' => (bool)$e->is_observers_learning,
-                'created'               => $e->created ? Carbon::parse($e->created)->toJSON() : null,
-                'updated'               => $e->updated ? Carbon::parse($e->updated)->toJSON() : null,
+                'observation'           => $e->observation_id,
+                'attachments'           => $attachments,
             ];
-
-            if ($includeObservationDetails) {
-                $item['observation_details'] = $obsMap[$e->observation_id] ?? null;
-                $item['rating']              = null;
-                $item['attachments_details'] = $attachmentsDetails;
-                $item['indicator_ratings']   = $indicatorRatings;
-                $item['indicators_count']    = count($indicatorRatings);
-            } else {
-                $item['observation']         = $e->observation_id;
-                $item['attachments_details'] = $attachmentsDetails;
-                $item['indicator_ratings']   = $indicatorRatings;
-            }
-
-            return $item;
         })->toArray();
     }
 
@@ -470,7 +488,20 @@ class EvidenceController extends Controller
     private function buildPrevUrl(Request $request, int $offset, int $limit): ?string
     {
         if ($offset > 0) {
-            return $request->fullUrlWithQuery(['offset' => max(0, $offset - $limit), 'limit' => $limit]);
+            $prevOffset = $offset - $limit;
+            if ($prevOffset <= 0) {
+                $url = $request->fullUrlWithQuery(['limit' => $limit]);
+                $parsed = parse_url($url);
+                parse_str($parsed['query'] ?? '', $queryParams);
+                unset($queryParams['offset']);
+                $newQuery = http_build_query($queryParams);
+                $scheme = $parsed['scheme'] ?? 'http';
+                $host = $parsed['host'] ?? '';
+                $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+                $path = $parsed['path'] ?? '';
+                return $scheme . '://' . $host . $port . $path . ($newQuery ? '?' . $newQuery : '');
+            }
+            return $request->fullUrlWithQuery(['offset' => $prevOffset, 'limit' => $limit]);
         }
         return null;
     }

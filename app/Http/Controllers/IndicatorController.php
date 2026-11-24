@@ -74,6 +74,7 @@ class IndicatorController extends Controller
                     'rub.description as rubric_description',
                     'rub.rating_scheme_id as rubric_rating_scheme_id',
                     'rub.account_id as rubric_account_id',
+                    'rub.updated as rubric_updated',
                     'rs.title as rating_scheme_title',
                     'rs.code as rating_scheme_code',
                     'rs.is_input_required',
@@ -108,40 +109,7 @@ class IndicatorController extends Controller
         }
 
         $indicatorIds = $indicators->pluck('id')->toArray();
-        $rubricIds = $indicators->pluck('rubric_id')->unique()->toArray();
-        $baseUrl = $request->root();
-
-        $rubricCounts = [];
-        if (!empty($rubricIds)) {
-            $propCounts = DB::table('rubrics_proposition')
-                ->whereIn('rubric_id', $rubricIds)
-                ->select('rubric_id', DB::raw('COUNT(DISTINCT id) as cnt'))
-                ->groupBy('rubric_id')
-                ->pluck('cnt', 'rubric_id');
-
-            $subCounts = DB::table('rubrics_subproposition as s')
-                ->join('rubrics_proposition as p', 's.proposition_id', '=', 'p.id')
-                ->whereIn('p.rubric_id', $rubricIds)
-                ->select('p.rubric_id', DB::raw('COUNT(DISTINCT s.id) as cnt'))
-                ->groupBy('p.rubric_id')
-                ->pluck('cnt', 'p.rubric_id');
-
-            $indCounts = DB::table('rubrics_indicator as i')
-                ->join('rubrics_subproposition as s', 'i.subproposition_id', '=', 's.id')
-                ->join('rubrics_proposition as p', 's.proposition_id', '=', 'p.id')
-                ->whereIn('p.rubric_id', $rubricIds)
-                ->select('p.rubric_id', DB::raw('COUNT(DISTINCT i.id) as cnt'))
-                ->groupBy('p.rubric_id')
-                ->pluck('cnt', 'p.rubric_id');
-
-            foreach ($rubricIds as $rId) {
-                $rubricCounts[$rId] = [
-                    'proposition_count'    => (int)($propCounts[$rId] ?? 0),
-                    'subproposition_count' => (int)($subCounts[$rId] ?? 0),
-                    'indicator_count'      => (int)($indCounts[$rId] ?? 0),
-                ];
-            }
-        }
+        $schemeAndHost = $request->getSchemeAndHttpHost();
 
         $tagCounts = DB::table('rubrics_indicator_tags')
             ->select('tag_id', DB::raw('COUNT(DISTINCT indicator_id) as cnt'))
@@ -160,6 +128,7 @@ class IndicatorController extends Controller
                 't.rubric_id',
                 'r.title as rubric_title',
             ])
+            ->orderBy('t.created', 'desc')
             ->get();
 
         $indicatorTagsMap = [];
@@ -174,34 +143,29 @@ class IndicatorController extends Controller
             ];
         }
 
-        return $indicators->map(function ($ind) use ($rubricCounts, $indicatorTagsMap, $baseUrl) {
-            $rId = $ind->rubric_id;
-            $counts = $rubricCounts[$rId] ?? ['proposition_count' => 0, 'subproposition_count' => 0, 'indicator_count' => 0];
-
+        return $indicators->map(function ($ind) use ($indicatorTagsMap, $schemeAndHost) {
             $rubricObj = [
-                'id'                   => $ind->rubric_id,
-                'title'                => $ind->rubric_title,
-                'description'          => $ind->rubric_description ?? '',
-                'rating_scheme'        => $ind->rubric_rating_scheme_id,
-                'account'              => $ind->rubric_account_id,
-                'rating_scheme_title'  => $ind->rating_scheme_title,
-                'rating_scheme_code'   => $ind->rating_scheme_code,
-                'is_input_required'    => (bool)$ind->is_input_required,
-                'proposition_count'    => $counts['proposition_count'],
-                'subproposition_count' => $counts['subproposition_count'],
-                'indicator_count'      => $counts['indicator_count'],
-                'indicator_url'        => "{$baseUrl}/api/v1/indicators/?rubric={$ind->rubric_id}",
+                'id'                  => $ind->rubric_id,
+                'indicator_url'       => "{$schemeAndHost}/v1/indicators?rubric={$ind->rubric_id}",
+                'rating_scheme_title' => $ind->rating_scheme_title,
+                'rating_scheme_code'  => $ind->rating_scheme_code,
+                'is_input_required'   => (bool)$ind->is_input_required,
+                'updated'             => $ind->rubric_updated ? Carbon::parse($ind->rubric_updated)->toJSON() : null,
+                'title'               => $ind->rubric_title,
+                'description'         => $ind->rubric_description ?? '',
+                'account'             => $ind->rubric_account_id,
+                'rating_scheme'       => $ind->rubric_rating_scheme_id,
             ];
 
             return [
                 'id'             => $ind->id,
+                'tags'           => $indicatorTagsMap[$ind->id] ?? [],
+                'rubric'         => $rubricObj,
+                'created'        => $ind->created ? Carbon::parse($ind->created)->toJSON() : null,
+                'updated'        => $ind->updated ? Carbon::parse($ind->updated)->toJSON() : null,
                 'title'          => $ind->title,
                 'description'    => $ind->description ?? '',
                 'subproposition' => $ind->subproposition,
-                'created'        => $ind->created ? Carbon::parse($ind->created)->toJSON() : null,
-                'updated'        => $ind->updated ? Carbon::parse($ind->updated)->toJSON() : null,
-                'tags'           => $indicatorTagsMap[$ind->id] ?? [],
-                'rubric'         => $rubricObj,
             ];
         })->toArray();
     }
@@ -217,7 +181,20 @@ class IndicatorController extends Controller
     private function buildPrevUrl(Request $request, int $offset, int $limit): ?string
     {
         if ($offset > 0) {
-            return $request->fullUrlWithQuery(['offset' => max(0, $offset - $limit), 'limit' => $limit]);
+            $prevOffset = $offset - $limit;
+            if ($prevOffset <= 0) {
+                $url = $request->fullUrlWithQuery(['limit' => $limit]);
+                $parsed = parse_url($url);
+                parse_str($parsed['query'] ?? '', $queryParams);
+                unset($queryParams['offset']);
+                $newQuery = http_build_query($queryParams);
+                $scheme = $parsed['scheme'] ?? 'http';
+                $host = $parsed['host'] ?? '';
+                $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+                $path = $parsed['path'] ?? '';
+                return $scheme . '://' . $host . $port . $path . ($newQuery ? '?' . $newQuery : '');
+            }
+            return $request->fullUrlWithQuery(['offset' => $prevOffset, 'limit' => $limit]);
         }
         return null;
     }
