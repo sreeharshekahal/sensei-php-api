@@ -372,7 +372,7 @@ class ObservationStatsController extends Controller
                 ->map(function ($row) {
                     return [
                         'date'             => Carbon::parse($row->date)->format('Y-m-d'),
-                        'avg_rating'       => (float)$row->avg_rating,
+                        'avg_rating'       => (float)($row->avg_rating ?? 0.0),
                         'indicators_count' => (int)$row->indicators_count,
                     ];
                 })
@@ -380,7 +380,7 @@ class ObservationStatsController extends Controller
 
             return response()->json([
                 'indicator_rating_stats' => $stats,
-            ], 200);
+            ], 200, [], JSON_PRESERVE_ZERO_FRACTION);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -426,7 +426,11 @@ class ObservationStatsController extends Controller
 
             $uraId = $account->user_role_account_id;
             $filename = "group_stats_report_{$groupId}_{$uraId}.pdf";
-            $downloadUrl = Storage::disk('s3')->url("reports/pdf/{$filename}");
+            try {
+                $downloadUrl = Storage::disk('s3')->url("reports/pdf/{$filename}");
+            } catch (\Exception $s3Ex) {
+                $downloadUrl = url("storage/reports/pdf/{$filename}");
+            }
 
             return response()->json([
                 'pdf_link' => $downloadUrl,
