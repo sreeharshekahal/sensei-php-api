@@ -334,7 +334,7 @@ class GroupController extends Controller
                     'rating_scheme_title' => $rubric->rating_scheme_title,
                     'rating_scheme_code'  => $rubric->rating_scheme_code,
                     'is_input_required'   => (bool)$rubric->is_input_required,
-                    'indicator_url'       => "{$baseUrl}/api/v1/indicators/?rubric={$rubric->id}",
+                    'indicator_url'       => request()->getSchemeAndHttpHost() . "/v1/indicators?rubric={$rubric->id}",
                 ];
             }
 

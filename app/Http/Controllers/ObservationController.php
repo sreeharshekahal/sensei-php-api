@@ -125,6 +125,7 @@ class ObservationController extends Controller
             $observations = $query->select([
                     'o.id',
                     'o.title',
+                    'o.description',
                     'o.group_id',
                     'o.observer_id',
                     'o.observee_id',
@@ -300,7 +301,7 @@ class ObservationController extends Controller
                 }
             }
 
-            $data['description'] = $obs->description ?? '';
+            $data['description'] = $obs->description ?? null;
             $data['indicators_count'] = $indicatorsCount;
             $data['indicators_rating'] = $indicatorRatings;
             $data['total_indicators_count'] = $totalIndicatorsCount;
@@ -368,53 +369,51 @@ class ObservationController extends Controller
             ->groupBy('observation_id')
             ->pluck('cnt', 'observation_id');
 
-        $baseUrl = $request->root();
+        $schemeAndHost = $request->getSchemeAndHttpHost();
 
-        return $observations->map(function ($o) use ($groupsData, $groupUserCounts, $formattedUras, $evidenceCounts, $baseUrl) {
+        return $observations->map(function ($o) use ($groupsData, $groupUserCounts, $formattedUras, $evidenceCounts, $schemeAndHost) {
             $g = $groupsData->get($o->group_id);
             $groupObj = null;
 
             if ($g) {
                 $rubricObj = $g->rubric_id ? [
                     'id'                  => $g->rubric_id,
-                    'title'               => $g->rubric_title,
-                    'description'         => $g->rubric_description ?? '',
-                    'updated'             => $g->rubric_updated ? Carbon::parse($g->rubric_updated)->toJSON() : null,
-                    'rating_scheme'       => $g->rubric_rating_scheme,
-                    'account'             => $g->rubric_account,
+                    'indicator_url'       => "{$schemeAndHost}/v1/indicators?rubric={$g->rubric_id}",
                     'rating_scheme_title' => $g->rubric_rating_scheme_title,
                     'rating_scheme_code'  => $g->rubric_rating_scheme_code,
                     'is_input_required'   => (bool)$g->rubric_is_input_required,
-                    'indicator_url'       => "{$baseUrl}/api/v1/indicators/?rubric={$g->rubric_id}",
+                    'updated'             => $g->rubric_updated ? Carbon::parse($g->rubric_updated)->toJSON() : null,
+                    'title'               => $g->rubric_title,
+                    'description'         => $g->rubric_description ?? '',
+                    'account'             => $g->rubric_account,
+                    'rating_scheme'       => $g->rubric_rating_scheme,
                 ] : null;
 
                 $groupObj = [
                     'id'          => $g->id,
-                    'title'       => $g->title,
-                    'description' => $g->description,
                     'users_count' => (int)($groupUserCounts[$g->id] ?? 0),
                     'created_by'  => $g->created_by,
                     'rubric'      => $rubricObj,
+                    'title'       => $g->title,
+                    'description' => $g->description ?? '',
                 ];
             }
 
             return [
                 'id'                  => $o->id,
-                'title'               => $o->title,
-                'group'               => $groupObj,
-                'group_id'            => $o->group_id,
                 'observer'            => $formattedUras[$o->observer_id] ?? null,
-                'observer_id'         => $o->observer_id,
                 'observee'            => $formattedUras[$o->observee_id] ?? null,
-                'observee_id'         => $o->observee_id,
-                'rubric_id'           => $o->rubric_id,
-                'is_published'        => (bool)$o->is_published,
                 'rating_scheme_title' => $o->rating_scheme_title,
                 'rating_scheme_code'  => $o->rating_scheme_code,
+                'group'               => $groupObj,
                 'evidences_count'     => (int)($evidenceCounts[$o->id] ?? 0),
-                'evidences_url'       => "{$baseUrl}/api/v1/observations/{$o->id}/evidences/",
+                'evidences_url'       => "{$schemeAndHost}/v1/observations/{$o->id}/evidences/",
                 'created'             => $o->created ? Carbon::parse($o->created)->toJSON() : null,
                 'updated'             => $o->updated ? Carbon::parse($o->updated)->toJSON() : null,
+                'title'               => $o->title,
+                'description'         => $o->description ?? null,
+                'is_published'        => (bool)$o->is_published,
+                'rubric'              => $o->rubric_id,
             ];
         })->toArray();
     }
