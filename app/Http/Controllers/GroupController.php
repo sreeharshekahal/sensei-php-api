@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class GroupController extends Controller
 {
@@ -80,6 +81,10 @@ class GroupController extends Controller
     public function show(string $id)
     {
         try {
+            if (empty($id) || !Str::isUuid($id)) {
+                return response()->json(['detail' => 'Not found.'], 404);
+            }
+
             $group = DB::table('access_group')->where('id', $id)->first();
 
             if (!$group) {
@@ -104,6 +109,10 @@ class GroupController extends Controller
     public function users(string $id)
     {
         try {
+            if (empty($id) || !Str::isUuid($id)) {
+                return response()->json(['detail' => 'Not found.'], 404);
+            }
+
             $groupExists = DB::table('access_group')->where('id', $id)->exists();
 
             if (!$groupExists) {
