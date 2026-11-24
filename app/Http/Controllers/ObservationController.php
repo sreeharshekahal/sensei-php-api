@@ -334,6 +334,7 @@ class ObservationController extends Controller
 
         $groupsData = DB::table('access_group as g')
             ->leftJoin('rubrics_rubric as r', 'g.rubric_id', '=', 'r.id')
+            ->leftJoin('observations_ratingscheme as rs', 'r.rating_scheme_id', '=', 'rs.id')
             ->leftJoin('access_userroleaccount as ura', 'g.created_by_id', '=', 'ura.id')
             ->leftJoin('auth_user as u', 'ura.user_id', '=', 'u.id')
             ->whereIn('g.id', $groupIds)
@@ -344,6 +345,13 @@ class ObservationController extends Controller
                 'u.username as created_by',
                 'r.id as rubric_id',
                 'r.title as rubric_title',
+                'r.description as rubric_description',
+                'r.rating_scheme_id as rubric_rating_scheme',
+                'r.account_id as rubric_account',
+                'r.updated as rubric_updated',
+                'rs.title as rubric_rating_scheme_title',
+                'rs.code as rubric_rating_scheme_code',
+                'rs.is_input_required as rubric_is_input_required',
             ])
             ->get()
             ->keyBy('id');
@@ -367,13 +375,26 @@ class ObservationController extends Controller
             $groupObj = null;
 
             if ($g) {
+                $rubricObj = $g->rubric_id ? [
+                    'id'                  => $g->rubric_id,
+                    'title'               => $g->rubric_title,
+                    'description'         => $g->rubric_description ?? '',
+                    'updated'             => $g->rubric_updated ? Carbon::parse($g->rubric_updated)->toJSON() : null,
+                    'rating_scheme'       => $g->rubric_rating_scheme,
+                    'account'             => $g->rubric_account,
+                    'rating_scheme_title' => $g->rubric_rating_scheme_title,
+                    'rating_scheme_code'  => $g->rubric_rating_scheme_code,
+                    'is_input_required'   => (bool)$g->rubric_is_input_required,
+                    'indicator_url'       => "{$baseUrl}/api/v1/indicators/?rubric={$g->rubric_id}",
+                ] : null;
+
                 $groupObj = [
                     'id'          => $g->id,
                     'title'       => $g->title,
                     'description' => $g->description,
                     'users_count' => (int)($groupUserCounts[$g->id] ?? 0),
                     'created_by'  => $g->created_by,
-                    'rubric'      => $g->rubric_id ? ['id' => $g->rubric_id, 'title' => $g->rubric_title] : null,
+                    'rubric'      => $rubricObj,
                 ];
             }
 

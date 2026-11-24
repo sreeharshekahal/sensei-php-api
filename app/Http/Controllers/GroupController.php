@@ -258,18 +258,36 @@ class GroupController extends Controller
             ->get()
             ->keyBy('id');
 
-        $rubricsMap = DB::table('rubrics_rubric')
-            ->whereIn('id', $rubricIds)
+        $rubricsMap = DB::table('rubrics_rubric as rub')
+            ->leftJoin('observations_ratingscheme as rs', 'rub.rating_scheme_id', '=', 'rs.id')
+            ->whereIn('rub.id', $rubricIds)
+            ->select([
+                'rub.id',
+                'rub.title',
+                'rub.description',
+                'rub.rating_scheme_id as rating_scheme',
+                'rub.account_id as account',
+                'rub.updated',
+                'rs.title as rating_scheme_title',
+                'rs.code as rating_scheme_code',
+                'rs.is_input_required',
+            ])
             ->get()
             ->keyBy('id');
 
         $creatorsMap = $this->fetchFormattedUras($creatorUraIds);
 
-        $usersCounts = DB::table('access_group_users')
+        $groupUsers = DB::table('access_group_users')
             ->whereIn('group_id', $groupIds)
-            ->select('group_id', DB::raw('COUNT(DISTINCT userroleaccount_id) as cnt'))
-            ->groupBy('group_id')
-            ->pluck('cnt', 'group_id');
+            ->select('group_id', 'userroleaccount_id')
+            ->get();
+
+        $groupUsersMap = [];
+        $usersCounts = [];
+        foreach ($groupUsers as $gu) {
+            $groupUsersMap[$gu->group_id][] = $gu->userroleaccount_id;
+            $usersCounts[$gu->group_id] = ($usersCounts[$gu->group_id] ?? 0) + 1;
+        }
 
         $obsCounts = DB::table('observations_observation')
             ->whereIn('group_id', $groupIds)
@@ -278,17 +296,47 @@ class GroupController extends Controller
             ->groupBy('group_id')
             ->pluck('cnt', 'group_id');
 
-        return $groups->map(function ($g) use ($accountsMap, $rubricsMap, $creatorsMap, $usersCounts, $obsCounts) {
+        $baseUrl = request()->root();
+
+        return $groups->map(function ($g) use ($accountsMap, $rubricsMap, $creatorsMap, $groupUsersMap, $usersCounts, $obsCounts, $baseUrl) {
             $account = $accountsMap->get($g->account_id);
             $rubric = $rubricsMap->get($g->rubric_id);
+
+            $accountObj = null;
+            if ($account) {
+                $accountObj = [
+                    'id'          => $account->id,
+                    'title'       => $account->title,
+                    'description' => $account->description ?? '',
+                    'logo'        => $account->logo_id ?? null,
+                    'app_url'     => $account->app_url ?? '',
+                ];
+            }
+
+            $rubricObj = null;
+            if ($rubric) {
+                $rubricObj = [
+                    'id'                  => $rubric->id,
+                    'title'               => $rubric->title,
+                    'description'         => $rubric->description ?? '',
+                    'updated'             => $rubric->updated ? Carbon::parse($rubric->updated)->toJSON() : null,
+                    'rating_scheme'       => $rubric->rating_scheme,
+                    'account'             => $rubric->account,
+                    'rating_scheme_title' => $rubric->rating_scheme_title,
+                    'rating_scheme_code'  => $rubric->rating_scheme_code,
+                    'is_input_required'   => (bool)$rubric->is_input_required,
+                    'indicator_url'       => "{$baseUrl}/api/v1/indicators/?rubric={$rubric->id}",
+                ];
+            }
 
             return [
                 'id'                 => $g->id,
                 'title'              => $g->title,
                 'description'        => $g->description,
-                'account'            => $account ? ['id' => $account->id, 'title' => $account->title] : null,
+                'users'              => $groupUsersMap[$g->id] ?? [],
+                'account'            => $accountObj,
                 'account_id'         => $g->account_id,
-                'rubric'             => $rubric ? ['id' => $rubric->id, 'title' => $rubric->title] : null,
+                'rubric'             => $rubricObj,
                 'rubric_id'          => $g->rubric_id,
                 'created_by'         => $creatorsMap[$g->created_by_id] ?? null,
                 'created_by_id'      => $g->created_by_id,
