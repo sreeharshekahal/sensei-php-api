@@ -447,7 +447,7 @@ class EvidenceController extends Controller
             $attachments = !empty($attachmentsDetails) ? array_values(array_column($attachmentsDetails, 'id')) : [];
 
             if ($includeObservationDetails) {
-                return [
+                $evidenceData = [
                     'id'                    => $e->id,
                     'observation_details'   => $obsMap[$e->observation_id] ?? null,
                     'attachments_details'   => $attachmentsDetails,
@@ -458,8 +458,13 @@ class EvidenceController extends Controller
                     'title'                 => $e->title,
                     'description'           => $e->description ?? '',
                     'is_observers_learning' => (bool)$e->is_observers_learning,
-                    'attachments'           => $attachments,
                 ];
+
+                if (!empty($attachments)) {
+                    $evidenceData['attachments'] = $attachments;
+                }
+
+                return $evidenceData;
             }
 
             return [
