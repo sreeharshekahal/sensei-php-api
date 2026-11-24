@@ -62,7 +62,9 @@ Route::middleware('auth.token')->group(function () {
     Route::get('/observations', [ObservationController::class, 'index']);
     Route::get('/observations/{id}', [ObservationController::class, 'show']);
     Route::get('/observations/{observationId}/evidences', [EvidenceController::class, 'observationEvidences']);
+    Route::get('/observations/{observationId}/evidences/', [EvidenceController::class, 'observationEvidences']);
     Route::post('/observations/{observationId}/evidences', [EvidenceController::class, 'storeObservationEvidence']);
+    Route::post('/observations/{observationId}/evidences/', [EvidenceController::class, 'storeObservationEvidence']);
 
     // Evidences
     Route::get('/evidences', [EvidenceController::class, 'index']);
