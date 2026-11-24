@@ -218,12 +218,12 @@ class GroupController extends Controller
             $results = $groups->map(function ($g) use ($groupMembersMap) {
                 return [
                     'id'          => $g->id,
+                    'members'     => $groupMembersMap[$g->id] ?? [],
                     'title'       => $g->title,
                     'description' => $g->description,
-                    'account_id'  => $g->account_id,
-                    'rubric_id'   => $g->rubric_id,
+                    'account'     => $g->account_id,
                     'created_by'  => $g->created_by_id,
-                    'members'     => $groupMembersMap[$g->id] ?? [],
+                    'rubric'      => $g->rubric_id,
                 ];
             })->toArray();
 
@@ -426,7 +426,7 @@ class GroupController extends Controller
                 ],
                 'created' => !empty($item->profile_created) ? Carbon::parse($item->profile_created)->toJSON() : null,
                 'updated' => !empty($item->profile_updated) ? Carbon::parse($item->profile_updated)->toJSON() : null,
-                'phone' => $item->phone ?? null,
+                'phone' => !empty($item->phone) ? (string)$item->phone : '',
                 'designation' => $item->designation ?? null,
                 'dob' => $item->dob ?? null,
             ],
