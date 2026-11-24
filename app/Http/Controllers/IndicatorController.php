@@ -181,7 +181,20 @@ class IndicatorController extends Controller
     private function buildPrevUrl(Request $request, int $offset, int $limit): ?string
     {
         if ($offset > 0) {
-            return $request->fullUrlWithQuery(['offset' => max(0, $offset - $limit), 'limit' => $limit]);
+            $prevOffset = $offset - $limit;
+            if ($prevOffset <= 0) {
+                $url = $request->fullUrlWithQuery(['limit' => $limit]);
+                $parsed = parse_url($url);
+                parse_str($parsed['query'] ?? '', $queryParams);
+                unset($queryParams['offset']);
+                $newQuery = http_build_query($queryParams);
+                $scheme = $parsed['scheme'] ?? 'http';
+                $host = $parsed['host'] ?? '';
+                $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+                $path = $parsed['path'] ?? '';
+                return $scheme . '://' . $host . $port . $path . ($newQuery ? '?' . $newQuery : '');
+            }
+            return $request->fullUrlWithQuery(['offset' => $prevOffset, 'limit' => $limit]);
         }
         return null;
     }

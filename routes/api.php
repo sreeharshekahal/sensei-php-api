@@ -60,6 +60,7 @@ Route::middleware('auth.token')->group(function () {
 
     // Observations
     Route::get('/observations', [ObservationController::class, 'index']);
+    Route::get('/observations/', [ObservationController::class, 'index']);
     Route::get('/observations/{id}', [ObservationController::class, 'show']);
     Route::get('/observations/{observationId}/evidences', [EvidenceController::class, 'observationEvidences']);
     Route::get('/observations/{observationId}/evidences/', [EvidenceController::class, 'observationEvidences']);
@@ -72,6 +73,7 @@ Route::middleware('auth.token')->group(function () {
 
     // Indicators
     Route::get('/indicators', [IndicatorController::class, 'index']);
+    Route::get('/indicators/', [IndicatorController::class, 'index']);
 
     // User Observation Statistics
     Route::get('/user-stats', [UserStatsController::class, 'index']);

@@ -33,7 +33,9 @@ class ObservationController extends Controller
 
             $query = DB::table('observations_observation as o')
                 ->join('access_userroleaccount as observer_ura', 'o.observer_id', '=', 'observer_ura.id')
+                ->join('auth_user as observer_u', 'observer_ura.user_id', '=', 'observer_u.id')
                 ->join('access_userroleaccount as observee_ura', 'o.observee_id', '=', 'observee_ura.id')
+                ->join('auth_user as observee_u', 'observee_ura.user_id', '=', 'observee_u.id')
                 ->join('access_role as observee_role', 'observee_ura.role_id', '=', 'observee_role.id')
                 ->leftJoin('rubrics_rubric as rub', 'o.rubric_id', '=', 'rub.id')
                 ->leftJoin('observations_ratingscheme as rs', 'rub.rating_scheme_id', '=', 'rs.id');
@@ -58,7 +60,7 @@ class ObservationController extends Controller
             }
 
             if ($request->filled('group')) {
-                $groupIds = array_filter(explode(',', $request->query('group')), fn($gid) => Str::isUuid($gid));
+                $groupIds = array_filter(explode(',', $request->input('group')), fn($gid) => Str::isUuid($gid));
                 if (count($groupIds) > 1) {
                     $query->whereIn('o.group_id', $groupIds);
                 } elseif (count($groupIds) === 1) {
@@ -66,55 +68,69 @@ class ObservationController extends Controller
                 }
             }
 
-            if ($request->filled('observee') && Str::isUuid($request->query('observee'))) {
-                $query->where('o.observee_id', $request->query('observee'));
+            if ($request->filled('observee') && Str::isUuid($request->input('observee'))) {
+                $query->where('o.observee_id', $request->input('observee'));
             }
 
-            if ($request->filled('observer') && Str::isUuid($request->query('observer'))) {
-                $query->where('o.observer_id', $request->query('observer'));
+            if ($request->filled('observer') && Str::isUuid($request->input('observer'))) {
+                $query->where('o.observer_id', $request->input('observer'));
             }
 
-            if ($request->filled('of') && Str::isUuid($request->query('of'))) {
-                $of = $request->query('of');
+            if ($request->filled('observee__user__username')) {
+                $query->where('observee_u.username', $request->input('observee__user__username'));
+            }
+
+            if ($request->filled('observer__user__username')) {
+                $query->where('observer_u.username', $request->input('observer__user__username'));
+            }
+
+            if ($request->filled('of') && Str::isUuid($request->input('of'))) {
+                $of = $request->input('of');
                 $query->where(function ($q) use ($of) {
                     $q->where('o.observer_id', $of)
                         ->orWhere('o.observee_id', $of);
                 });
             }
 
-            if ($request->filled('is_published')) {
-                $isPublished = filter_var($request->query('is_published'), FILTER_VALIDATE_BOOLEAN);
-                $query->where('o.is_published', $isPublished);
+            if ($request->has('is_published')) {
+                $val = $request->input('is_published');
+                if ($val !== null && $val !== '') {
+                    $isPublished = filter_var($val, FILTER_VALIDATE_BOOLEAN);
+                    $query->where('o.is_published', $isPublished);
+                }
             }
 
-            if ($request->filled('is_observers_learning')) {
-                $isLearning = filter_var($request->query('is_observers_learning'), FILTER_VALIDATE_BOOLEAN);
-                $query->whereExists(function ($sub) use ($isLearning) {
-                    $sub->select(DB::raw(1))
-                        ->from('observations_evidence as e')
-                        ->whereColumn('e.observation_id', 'o.id')
-                        ->where('e.is_observers_learning', $isLearning);
-                });
+            if ($request->has('is_observers_learning')) {
+                $val = $request->input('is_observers_learning');
+                if ($val !== null && $val !== '') {
+                    $isLearning = filter_var($val, FILTER_VALIDATE_BOOLEAN);
+                    $query->whereExists(function ($sub) use ($isLearning) {
+                        $sub->select(DB::raw(1))
+                            ->from('observations_evidence as e')
+                            ->whereColumn('e.observation_id', 'o.id')
+                            ->where('e.is_observers_learning', $isLearning);
+                    });
+                }
             }
 
             if ($request->filled('account')) {
-                $accountId = $request->query('account');
+                $accountId = $request->input('account');
                 $query->join('access_group as ag_acc', 'o.group_id', '=', 'ag_acc.id')
                     ->where('ag_acc.account_id', $accountId);
             }
 
             $total = $query->distinct()->count('o.id');
 
-            $limit = (int)$request->query('limit', $request->query('page_size', 10));
+            $limit = (int)$request->input('limit', $request->input('page_size', 10));
             $limit = max(1, min($limit, 1000));
 
-            $offset = (int)$request->query('offset', 0);
-            if ($request->filled('page') && !$request->filled('offset')) {
-                $page = max(1, (int)$request->query('page'));
+            $offset = (int)$request->input('offset', 0);
+            if ($request->filled('page') && !$request->has('offset')) {
+                $page = max(1, (int)$request->input('page'));
                 $offset = ($page - 1) * $limit;
             }
 
-            $ordering = $request->query('ordering', '-created');
+            $ordering = $request->input('ordering', '-created');
             $orderDirection = str_starts_with($ordering, '-') ? 'desc' : 'asc';
             $orderField = ltrim($ordering, '-');
             if (!in_array($orderField, ['created', 'updated', 'title'])) {
@@ -524,7 +540,20 @@ class ObservationController extends Controller
     private function buildPrevUrl(Request $request, int $offset, int $limit): ?string
     {
         if ($offset > 0) {
-            return $request->fullUrlWithQuery(['offset' => max(0, $offset - $limit), 'limit' => $limit]);
+            $prevOffset = $offset - $limit;
+            if ($prevOffset <= 0) {
+                $url = $request->fullUrlWithQuery(['limit' => $limit]);
+                $parsed = parse_url($url);
+                parse_str($parsed['query'] ?? '', $queryParams);
+                unset($queryParams['offset']);
+                $newQuery = http_build_query($queryParams);
+                $scheme = $parsed['scheme'] ?? 'http';
+                $host = $parsed['host'] ?? '';
+                $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+                $path = $parsed['path'] ?? '';
+                return $scheme . '://' . $host . $port . $path . ($newQuery ? '?' . $newQuery : '');
+            }
+            return $request->fullUrlWithQuery(['offset' => $prevOffset, 'limit' => $limit]);
         }
         return null;
     }
