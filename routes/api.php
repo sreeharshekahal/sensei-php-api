@@ -68,6 +68,7 @@ Route::middleware('auth.token')->group(function () {
 
     // Evidences
     Route::get('/evidences', [EvidenceController::class, 'index']);
+    Route::get('/evidences/', [EvidenceController::class, 'index']);
 
     // Indicators
     Route::get('/indicators', [IndicatorController::class, 'index']);

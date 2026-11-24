@@ -41,6 +41,15 @@ class EvidenceController extends Controller
                 });
             }
 
+            if ($request->filled('group')) {
+                $groupIds = array_filter(explode(',', $request->query('group')), fn($gid) => Str::isUuid($gid));
+                if (count($groupIds) > 1) {
+                    $query->whereIn('o.group_id', $groupIds);
+                } elseif (count($groupIds) === 1) {
+                    $query->where('o.group_id', reset($groupIds));
+                }
+            }
+
             if ($request->filled('is_observers_learning')) {
                 $isLearning = filter_var($request->query('is_observers_learning'), FILTER_VALIDATE_BOOLEAN);
                 $query->where('e.is_observers_learning', $isLearning);
@@ -376,6 +385,7 @@ class EvidenceController extends Controller
                 'a.file_type',
                 'a.size',
                 'a.attachment_type',
+                'a.hash_value',
                 'a.created',
                 'a.updated',
             ])
@@ -393,13 +403,14 @@ class EvidenceController extends Controller
 
             $attachmentsMap[$att->evidence_id][] = [
                 'id'              => $att->id,
-                'name'            => $att->name,
+                'created'         => $att->created ? Carbon::parse($att->created)->toJSON() : null,
+                'updated'         => $att->updated ? Carbon::parse($att->updated)->toJSON() : null,
+                'attachment_type' => $att->attachment_type,
                 'path'            => $path,
                 'file_type'       => $att->file_type,
                 'size'            => $att->size !== null ? (int)$att->size : null,
-                'attachment_type' => $att->attachment_type,
-                'created'         => $att->created ? Carbon::parse($att->created)->toJSON() : null,
-                'updated'         => $att->updated ? Carbon::parse($att->updated)->toJSON() : null,
+                'hash_value'      => $att->hash_value ?? null,
+                'name'            => $att->name,
             ];
         }
 
@@ -433,6 +444,7 @@ class EvidenceController extends Controller
         return $evidences->map(function ($e) use ($includeObservationDetails, $obsMap, $attachmentsMap, $ratingsMap) {
             $indicatorRatings = $ratingsMap[$e->id] ?? [];
             $attachmentsDetails = $attachmentsMap[$e->id] ?? [];
+            $attachments = !empty($attachmentsDetails) ? array_values(array_column($attachmentsDetails, 'id')) : [];
 
             if ($includeObservationDetails) {
                 return [
@@ -446,20 +458,21 @@ class EvidenceController extends Controller
                     'title'                 => $e->title,
                     'description'           => $e->description ?? '',
                     'is_observers_learning' => (bool)$e->is_observers_learning,
+                    'attachments'           => $attachments,
                 ];
             }
 
             return [
                 'id'                    => $e->id,
-                'observation'           => $e->observation_id,
-                'attachments_details'   => $attachmentsDetails,
                 'indicator_ratings'     => $indicatorRatings,
-                'indicators_count'      => count($indicatorRatings),
+                'attachments_details'   => $attachmentsDetails,
                 'created'               => $e->created ? Carbon::parse($e->created)->toJSON() : null,
                 'updated'               => $e->updated ? Carbon::parse($e->updated)->toJSON() : null,
                 'title'                 => $e->title,
                 'description'           => $e->description ?? '',
                 'is_observers_learning' => (bool)$e->is_observers_learning,
+                'observation'           => $e->observation_id,
+                'attachments'           => $attachments,
             ];
         })->toArray();
     }
