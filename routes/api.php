@@ -7,6 +7,8 @@ use App\Http\Controllers\GroupController;
 use App\Http\Controllers\IndicatorController;
 use App\Http\Controllers\ObservationController;
 use App\Http\Controllers\ObservationStatsController;
+use App\Http\Controllers\RatingController;
+use App\Http\Controllers\TagController;
 use App\Http\Controllers\UserRoleAccountController;
 use App\Http\Controllers\UserStatsController;
 use Illuminate\Support\Facades\Route;
@@ -60,20 +62,26 @@ Route::middleware('auth.token')->group(function () {
 
     // Observations
     Route::get('/observations', [ObservationController::class, 'index']);
-    Route::get('/observations/', [ObservationController::class, 'index']);
+    Route::post('/observations', [ObservationController::class, 'store']);
     Route::get('/observations/{id}', [ObservationController::class, 'show']);
+    Route::patch('/observations/{id}', [ObservationController::class, 'update']);
+    Route::put('/observations/{id}', [ObservationController::class, 'update']);
     Route::get('/observations/{observationId}/evidences', [EvidenceController::class, 'observationEvidences']);
-    Route::get('/observations/{observationId}/evidences/', [EvidenceController::class, 'observationEvidences']);
     Route::post('/observations/{observationId}/evidences', [EvidenceController::class, 'storeObservationEvidence']);
-    Route::post('/observations/{observationId}/evidences/', [EvidenceController::class, 'storeObservationEvidence']);
 
     // Evidences
     Route::get('/evidences', [EvidenceController::class, 'index']);
-    Route::get('/evidences/', [EvidenceController::class, 'index']);
 
     // Indicators
     Route::get('/indicators', [IndicatorController::class, 'index']);
-    Route::get('/indicators/', [IndicatorController::class, 'index']);
+
+    // Tags
+    Route::get('/tags', [TagController::class, 'index']);
+    Route::get('/tags/{id}', [TagController::class, 'show']);
+
+    // Ratings
+    Route::get('/ratings', [RatingController::class, 'index']);
+    Route::get('/ratings/{id}', [RatingController::class, 'show']);
 
     // User Observation Statistics
     Route::get('/user-stats', [UserStatsController::class, 'index']);
@@ -82,6 +90,8 @@ Route::middleware('auth.token')->group(function () {
     // Observation Statistics Breakdown
     Route::get('/observation-stats', [ObservationStatsController::class, 'breakdown']);
 
-    // Group Member Observation Statistics
+    // Group Member Observation Statistics & Analytics
     Route::get('/groups/{groupId}/observation-stats/{uraId}', [ObservationStatsController::class, 'groupMemberStats']);
+    Route::get('/groups/{groupId}/indicator-rating-charts/{uraId}', [ObservationStatsController::class, 'indicatorRatingCharts']);
+    Route::post('/group-stats-pdf-report', [ObservationStatsController::class, 'groupStatsPdfReport']);
 });

@@ -348,6 +348,126 @@ class ObservationController extends Controller
         }
     }
 
+    /**
+     * Create a new observation draft.
+     * Matches Django observations POST endpoint.
+     */
+    public function store(Request $request)
+    {
+        $user = $request->user();
+        $currentUserUra = DB::table('access_userroleaccount as ura')
+            ->where('ura.user_id', $user->id)
+            ->value('ura.id');
+
+        $request->validate([
+            'group'        => 'required|uuid|exists:access_group,id',
+            'observee'     => 'required|uuid|exists:access_userroleaccount,id',
+            'observer'     => 'nullable|uuid|exists:access_userroleaccount,id',
+            'rubric'       => 'nullable|uuid|exists:rubrics_rubric,id',
+            'title'        => 'nullable|string|max:255',
+            'description'  => 'nullable|string',
+            'is_published' => 'nullable|boolean',
+        ]);
+
+        try {
+            $groupId = $request->input('group');
+            $observeeId = $request->input('observee');
+            $observerId = $request->input('observer', $currentUserUra);
+            $rubricId = $request->input('rubric');
+
+            // If rubric is not explicitly passed, look it up from the group
+            if (!$rubricId) {
+                $rubricId = DB::table('access_group')->where('id', $groupId)->value('rubric_id');
+            }
+
+            if (!$rubricId) {
+                return response()->json([
+                    'rubric' => ['Rubric is required or must be configured for the selected group.']
+                ], 400);
+            }
+
+            $id = Str::uuid()->toString();
+
+            DB::table('observations_observation')->insert([
+                'id'           => $id,
+                'title'        => $request->input('title', ''),
+                'description'  => $request->input('description', ''),
+                'group_id'     => $groupId,
+                'observer_id'  => $observerId,
+                'observee_id'  => $observeeId,
+                'rubric_id'    => $rubricId,
+                'is_published' => $request->boolean('is_published', false),
+                'created'      => now(),
+                'updated'      => now(),
+            ]);
+
+            return $this->show($request, $id)->setStatusCode(201);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to create observation.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update an observation draft / publish state.
+     * Supports both PATCH and PUT.
+     */
+    public function update(Request $request, string $id)
+    {
+        if (empty($id) || !Str::isUuid($id)) {
+            return response()->json(['detail' => 'Observation not found.'], 404);
+        }
+
+        $observation = DB::table('observations_observation')->where('id', $id)->first();
+        if (!$observation) {
+            return response()->json(['detail' => 'Observation not found.'], 404);
+        }
+
+        $request->validate([
+            'is_published' => 'nullable|boolean',
+            'title'        => 'nullable|string|max:255',
+            'description'  => 'nullable|string',
+            'group'        => 'nullable|uuid|exists:access_group,id',
+            'rubric'       => 'nullable|uuid|exists:rubrics_rubric,id',
+        ]);
+
+        try {
+            $updateData = [];
+
+            if ($request->has('is_published')) {
+                $updateData['is_published'] = $request->boolean('is_published');
+            }
+            if ($request->has('title')) {
+                $updateData['title'] = $request->input('title');
+            }
+            if ($request->has('description')) {
+                $updateData['description'] = $request->input('description');
+            }
+            if ($request->filled('group')) {
+                $updateData['group_id'] = $request->input('group');
+            }
+            if ($request->filled('rubric')) {
+                $updateData['rubric_id'] = $request->input('rubric');
+            }
+
+            if (!empty($updateData)) {
+                $updateData['updated'] = now();
+                DB::table('observations_observation')->where('id', $id)->update($updateData);
+            }
+
+            return $this->show($request, $id);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to update observation.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     private function formatObservations($observations, Request $request): array
     {
         if ($observations->isEmpty()) {

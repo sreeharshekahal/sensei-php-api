@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class ObservationStatsController extends Controller
 {
@@ -310,6 +311,133 @@ class ObservationStatsController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to retrieve group observation statistics.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Fetch indicator rating chart analytics data for a member in a group.
+     */
+    public function indicatorRatingCharts(string $groupId, string $uraId)
+    {
+        try {
+            $group = DB::table('access_group')->where('id', $groupId)->first();
+            if (!$group) {
+                return response()->json(['detail' => 'Group not found.'], 404);
+            }
+
+            $query = DB::table('access_userroleaccount as ura')
+                ->join('auth_user as u', 'ura.user_id', '=', 'u.id')
+                ->select('ura.id as user_role_account_id');
+
+            if (is_numeric($uraId)) {
+                $query->where('u.id', (int)$uraId);
+            } else {
+                $query->where('ura.id', $uraId);
+            }
+
+            $account = $query->first();
+
+            if (!$account) {
+                return response()->json(['detail' => 'User role account not found.'], 404);
+            }
+
+            $actualUraId = $account->user_role_account_id;
+
+            $isMember = DB::table('access_group_users')
+                ->where('group_id', $groupId)
+                ->where('userroleaccount_id', $actualUraId)
+                ->exists();
+
+            if (!$isMember) {
+                return response()->json(['detail' => 'User is not a member of this group.'], 404);
+            }
+
+            $stats = DB::table('observations_indicatorrating as ir')
+                ->join('observations_evidence as e', 'ir.evidence_id', '=', 'e.id')
+                ->join('observations_observation as o', 'e.observation_id', '=', 'o.id')
+                ->join('observations_rating as r', 'ir.rating_id', '=', 'r.id')
+                ->where('o.group_id', $groupId)
+                ->where('o.observee_id', $actualUraId)
+                ->where('o.is_published', true)
+                ->select([
+                    DB::raw('DATE(o.created) as date'),
+                    DB::raw('AVG(r.score) as avg_rating'),
+                    DB::raw('COUNT(ir.indicator_id) as indicators_count'),
+                ])
+                ->groupBy(DB::raw('DATE(o.created)'))
+                ->orderBy(DB::raw('DATE(o.created)'), 'asc')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'date'             => Carbon::parse($row->date)->format('Y-m-d'),
+                        'avg_rating'       => (float)$row->avg_rating,
+                        'indicators_count' => (int)$row->indicators_count,
+                    ];
+                })
+                ->toArray();
+
+            return response()->json([
+                'indicator_rating_stats' => $stats,
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to retrieve indicator rating chart data.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Generates or returns PDF report link for group member stats.
+     */
+    public function groupStatsPdfReport(Request $request)
+    {
+        $request->validate([
+            'ura'   => 'required',
+            'group' => 'required|uuid|exists:access_group,id',
+        ]);
+
+        $groupId = $request->input('group');
+        $uraParam = $request->input('ura');
+
+        try {
+            $group = DB::table('access_group')->where('id', $groupId)->first();
+            if (!$group) {
+                return response()->json(['detail' => 'Group not found.'], 404);
+            }
+
+            $query = DB::table('access_userroleaccount as ura')
+                ->join('auth_user as u', 'ura.user_id', '=', 'u.id')
+                ->select('ura.id as user_role_account_id');
+
+            if (is_numeric($uraParam)) {
+                $query->where('u.id', (int)$uraParam);
+            } else {
+                $query->where('ura.id', $uraParam);
+            }
+
+            $account = $query->first();
+            if (!$account) {
+                return response()->json(['detail' => 'User role account not found.'], 404);
+            }
+
+            $uraId = $account->user_role_account_id;
+            $filename = "group_stats_report_{$groupId}_{$uraId}.pdf";
+            $downloadUrl = Storage::disk('s3')->url("reports/pdf/{$filename}");
+
+            return response()->json([
+                'pdf_link' => $downloadUrl,
+                'url'      => $downloadUrl,
+                'filename' => $filename,
+                'message'  => 'Report generated successfully.',
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to generate group stats PDF report.',
                 'details' => $e->getMessage()
             ], 500);
         }
