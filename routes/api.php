@@ -47,7 +47,8 @@ Route::middleware('auth.token')->group(function () {
     Route::get('/user-role-accounts', [UserRoleAccountController::class, 'index']);
     Route::post('/user-role-accounts', [UserRoleAccountController::class, 'store']);
     Route::get('/user-role-accounts/me', [UserRoleAccountController::class, 'me']);
-    Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show'])->where('id', '[0-9]+|[0-9a-fA-F-]{36}');
+    Route::get('/user-role-accounts/{id}/user_groups', [UserRoleAccountController::class, 'userGroups']);
+    Route::get('/user-role-accounts/{id}', [UserRoleAccountController::class, 'show']);
     Route::patch('/user-role-accounts/{id}', [UserRoleAccountController::class, 'update']);
     Route::delete('/user-role-accounts/{id}', [UserRoleAccountController::class, 'destroy']);
     Route::post('/user-role-accounts/bulk_delete', [UserRoleAccountController::class, 'bulkDelete']);
