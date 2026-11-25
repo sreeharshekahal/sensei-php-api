@@ -6,6 +6,7 @@ use App\Models\AuthUser;
 use App\Models\UserRoleAccount;
 use App\Services\DjangoPasswordHasher;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -390,11 +391,31 @@ class UserRoleAccountController extends Controller
     }
 
     /**
+     * Return the current authenticated user's role account.
+     */
+    public function me()
+    {
+        $user = Auth::user();
+
+        if (!$user) {
+            return response()->json([
+                'detail' => 'Authentication credentials were not provided.'
+            ], 401);
+        }
+
+        return $this->show($user->id);
+    }
+
+    /**
      * Display the specified user role account detail with profile, role, and groups
      * (Supports both User ID integer and Role Account UUID lookups)
      */
     public function show(int|string $id)
     {
+        if ($id === 'me') {
+            return $this->me();
+        }
+
         try {
             // 1️⃣ Fetch the core record with explicit joins
             $query = DB::table('access_userroleaccount as ura')

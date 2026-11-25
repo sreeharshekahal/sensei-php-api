@@ -5,6 +5,7 @@ use Illuminate\Http\Request;
 
 // Suppress deprecation notices from breaking JSON API responses in PHP 8.5+
 error_reporting(E_ALL & ~E_DEPRECATED);
+ini_set('display_errors', '0');
 
 define('LARAVEL_START', microtime(true));
 
