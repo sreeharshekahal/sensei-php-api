@@ -251,7 +251,7 @@ class GroupController extends Controller
             ->first();
     }
 
-    private function formatGroupDetails($groups): array
+    public function formatGroupDetails($groups): array
     {
         if ($groups->isEmpty()) {
             return [];

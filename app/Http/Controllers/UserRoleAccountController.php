@@ -407,6 +407,42 @@ class UserRoleAccountController extends Controller
     }
 
     /**
+     * Return the groups belonging to the specified user role account.
+     * (Supports both User ID integer and Role Account UUID lookups)
+     */
+    public function userGroups(int|string $id)
+    {
+        try {
+            $ura = is_numeric($id)
+                ? UserRoleAccount::firstWhere('user_id', $id)
+                : UserRoleAccount::find($id);
+
+            if (!$ura) {
+                return response()->json([
+                    'detail' => 'Not found.'
+                ], 404);
+            }
+
+            $groups = DB::table('access_group as g')
+                ->join('access_group_users as gu', 'gu.group_id', '=', 'g.id')
+                ->where('gu.userroleaccount_id', $ura->id)
+                ->select('g.*')
+                ->orderBy('g.updated', 'desc')
+                ->get();
+
+            $results = app(GroupController::class)->formatGroupDetails($groups);
+
+            return response()->json($results, 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to retrieve user groups.',
+                'details' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Display the specified user role account detail with profile, role, and groups
      * (Supports both User ID integer and Role Account UUID lookups)
      */
