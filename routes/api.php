@@ -11,6 +11,7 @@ use App\Http\Controllers\ObservationStatsController;
 use App\Http\Controllers\PropositionController;
 use App\Http\Controllers\RatingController;
 use App\Http\Controllers\RatingSchemeController;
+use App\Http\Controllers\RubricController;
 use App\Http\Controllers\TagController;
 use App\Http\Controllers\UserRoleAccountController;
 use App\Http\Controllers\UserStatsController;
@@ -122,6 +123,15 @@ Route::middleware('auth.token')->group(function () {
     Route::put('/propositions/{id}', [PropositionController::class, 'update']);
     Route::patch('/propositions/{id}', [PropositionController::class, 'update']);
     Route::delete('/propositions/{id}', [PropositionController::class, 'destroy']);
+
+    // Rubrics
+    Route::get('/rubrics', [RubricController::class, 'index']);
+    Route::post('/rubrics', [RubricController::class, 'store']);
+    Route::get('/rubrics/{id}/tree', [RubricController::class, 'tree']);
+    Route::get('/rubrics/{id}', [RubricController::class, 'show']);
+    Route::put('/rubrics/{id}', [RubricController::class, 'update']);
+    Route::patch('/rubrics/{id}', [RubricController::class, 'update']);
+    Route::delete('/rubrics/{id}', [RubricController::class, 'destroy']);
 
     // Observation Statistics Breakdown
     Route::get('/observation-stats', [ObservationStatsController::class, 'breakdown']);
