@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AccessRoleController;
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\EvidenceController;
@@ -9,6 +10,7 @@ use App\Http\Controllers\ObservationController;
 use App\Http\Controllers\ObservationStatsController;
 use App\Http\Controllers\PropositionController;
 use App\Http\Controllers\RatingController;
+use App\Http\Controllers\RatingSchemeController;
 use App\Http\Controllers\TagController;
 use App\Http\Controllers\UserRoleAccountController;
 use App\Http\Controllers\UserStatsController;
@@ -91,6 +93,23 @@ Route::middleware('auth.token')->group(function () {
     // Ratings
     Route::get('/ratings', [RatingController::class, 'index']);
     Route::get('/ratings/{id}', [RatingController::class, 'show']);
+
+    // Rating Schemes
+    Route::get('/rating-schemes', [RatingSchemeController::class, 'index']);
+    Route::post('/rating-schemes', [RatingSchemeController::class, 'store']);
+    Route::get('/rating-schemes/{id}', [RatingSchemeController::class, 'show']);
+    Route::put('/rating-schemes/{id}', [RatingSchemeController::class, 'update']);
+    Route::patch('/rating-schemes/{id}', [RatingSchemeController::class, 'update']);
+    Route::delete('/rating-schemes/{id}', [RatingSchemeController::class, 'destroy']);
+
+    // Access Roles
+    Route::get('/roles', [AccessRoleController::class, 'index']);
+    Route::post('/roles', [AccessRoleController::class, 'store']);
+    Route::post('/roles/bulk_delete', [AccessRoleController::class, 'bulkDelete']);
+    Route::get('/roles/{id}', [AccessRoleController::class, 'show']);
+    Route::put('/roles/{id}', [AccessRoleController::class, 'update']);
+    Route::patch('/roles/{id}', [AccessRoleController::class, 'update']);
+    Route::delete('/roles/{id}', [AccessRoleController::class, 'destroy']);
 
     // User Observation Statistics
     Route::get('/user-stats', [UserStatsController::class, 'index']);
