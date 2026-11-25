@@ -7,6 +7,7 @@ use App\Http\Controllers\GroupController;
 use App\Http\Controllers\IndicatorController;
 use App\Http\Controllers\ObservationController;
 use App\Http\Controllers\ObservationStatsController;
+use App\Http\Controllers\PropositionController;
 use App\Http\Controllers\RatingController;
 use App\Http\Controllers\TagController;
 use App\Http\Controllers\UserRoleAccountController;
@@ -55,6 +56,7 @@ Route::middleware('auth.token')->group(function () {
 
     // Attachments
     Route::post('/attachments', [AttachmentController::class, 'store']);
+    Route::get('/attachments/{id}', [AttachmentController::class, 'show']);
 
     // Groups & Members
     Route::get('/my-group-based-members', [GroupController::class, 'myGroupBasedMembers']);
@@ -79,7 +81,12 @@ Route::middleware('auth.token')->group(function () {
 
     // Tags
     Route::get('/tags', [TagController::class, 'index']);
+    Route::post('/tags', [TagController::class, 'store']);
+    Route::post('/tags/bulk_delete', [TagController::class, 'bulkDelete']);
     Route::get('/tags/{id}', [TagController::class, 'show']);
+    Route::put('/tags/{id}', [TagController::class, 'update']);
+    Route::patch('/tags/{id}', [TagController::class, 'update']);
+    Route::delete('/tags/{id}', [TagController::class, 'destroy']);
 
     // Ratings
     Route::get('/ratings', [RatingController::class, 'index']);
@@ -88,6 +95,14 @@ Route::middleware('auth.token')->group(function () {
     // User Observation Statistics
     Route::get('/user-stats', [UserStatsController::class, 'index']);
     Route::get('/user-stats/{id}', [UserStatsController::class, 'show']);
+
+    // Propositions
+    Route::get('/propositions', [PropositionController::class, 'index']);
+    Route::post('/propositions', [PropositionController::class, 'store']);
+    Route::get('/propositions/{id}', [PropositionController::class, 'show']);
+    Route::put('/propositions/{id}', [PropositionController::class, 'update']);
+    Route::patch('/propositions/{id}', [PropositionController::class, 'update']);
+    Route::delete('/propositions/{id}', [PropositionController::class, 'destroy']);
 
     // Observation Statistics Breakdown
     Route::get('/observation-stats', [ObservationStatsController::class, 'breakdown']);
