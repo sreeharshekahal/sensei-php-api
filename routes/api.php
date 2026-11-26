@@ -66,7 +66,12 @@ Route::middleware('auth.token')->group(function () {
     // Groups & Members
     Route::get('/my-group-based-members', [GroupController::class, 'myGroupBasedMembers']);
     Route::get('/groups', [GroupController::class, 'index']);
+    Route::post('/groups', [GroupController::class, 'store']);
+    Route::post('/groups/bulk_delete', [GroupController::class, 'bulkDelete']);
     Route::get('/groups/{id}', [GroupController::class, 'show']);
+    Route::put('/groups/{id}', [GroupController::class, 'update']);
+    Route::patch('/groups/{id}', [GroupController::class, 'update']);
+    Route::delete('/groups/{id}', [GroupController::class, 'destroy']);
     Route::get('/groups/{id}/users', [GroupController::class, 'users']);
 
     // Observations
