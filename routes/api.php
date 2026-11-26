@@ -88,6 +88,11 @@ Route::middleware('auth.token')->group(function () {
 
     // Indicators
     Route::get('/indicators', [IndicatorController::class, 'index']);
+    Route::post('/indicators', [IndicatorController::class, 'store']);
+    Route::get('/indicators/{id}', [IndicatorController::class, 'show']);
+    Route::put('/indicators/{id}', [IndicatorController::class, 'update']);
+    Route::patch('/indicators/{id}', [IndicatorController::class, 'update']);
+    Route::delete('/indicators/{id}', [IndicatorController::class, 'destroy']);
 
     // Tags
     Route::get('/tags', [TagController::class, 'index']);
