@@ -158,6 +158,7 @@ Route::middleware('auth.token')->group(function () {
     Route::get('/groups/{groupId}/member-observation-rating-reports/{uraId}', [ObservationReportController::class, 'memberObservationRatingReportDetail']);
     Route::get('/groups/{groupId}/member-observation-indicators-reports/{uraId}', [ObservationReportController::class, 'memberObservationIndicatorsReport']);
     Route::get('/groups/{groupId}/member-observation-activity-reports/{uraId}', [ObservationReportController::class, 'memberObservationActivityReport']);
+    Route::get('/groups/{groupId}/user-role-account/{uraId}/group-user-indicators', [ObservationReportController::class, 'groupUserIndicators']);
     Route::get('/groups/{groupId}/observation-advance-report/download_report', [ObservationReportController::class, 'downloadAdvanceReport']);
     Route::get('/groups/{groupId}/observation-advance-report', [ObservationReportController::class, 'advanceReport']);
     Route::get('/groups/{groupId}/advance-trends/{pk}/download_report', [ObservationReportController::class, 'downloadAdvanceTrends']);
