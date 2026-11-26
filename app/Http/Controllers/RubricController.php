@@ -42,7 +42,7 @@ class RubricController extends Controller
                 $query->where('r.title', 'ilike', "%{$search}%");
             }
 
-            $ordering = $request->query('ordering', 'title');
+            $ordering = $request->query('ordering', 'created');
             $orderDirection = str_starts_with($ordering, '-') ? 'desc' : 'asc';
             $orderField = ltrim($ordering, '-');
 
@@ -55,7 +55,7 @@ class RubricController extends Controller
             } elseif (in_array($orderField, ['title', 'created', 'updated'])) {
                 $query->orderBy("r.{$orderField}", $orderDirection);
             } else {
-                $query->orderBy('r.title', 'asc');
+                $query->orderBy('r.created', 'asc');
             }
 
             $total = (clone $query)->count('r.id');
@@ -339,19 +339,13 @@ class RubricController extends Controller
 
             $tagsMap = [];
             if (!empty($indicatorIds)) {
-                $tagRows = DB::table('rubrics_indicator_tags as it')
-                    ->join('rubrics_tag as t', 'it.tag_id', '=', 't.id')
-                    ->whereIn('it.indicator_id', $indicatorIds)
-                    ->select(['it.indicator_id', 't.id', 't.title', 't.description', 't.rubric_id'])
+                $tagRows = DB::table('rubrics_indicator_tags')
+                    ->whereIn('indicator_id', $indicatorIds)
+                    ->select(['indicator_id', 'tag_id'])
                     ->get();
 
                 foreach ($tagRows as $row) {
-                    $tagsMap[$row->indicator_id][] = [
-                        'id'          => $row->id,
-                        'title'       => $row->title,
-                        'description' => $row->description ?? '',
-                        'rubric'      => $row->rubric_id,
-                    ];
+                    $tagsMap[$row->indicator_id][] = $row->tag_id;
                 }
             }
 
@@ -363,8 +357,6 @@ class RubricController extends Controller
                     'description'    => $ind->description ?? '',
                     'subproposition' => $ind->subproposition_id,
                     'tags'           => $tagsMap[$ind->id] ?? [],
-                    'created'        => $ind->created ? Carbon::parse($ind->created)->toJSON() : null,
-                    'updated'        => $ind->updated ? Carbon::parse($ind->updated)->toJSON() : null,
                 ];
             }
 
@@ -372,31 +364,32 @@ class RubricController extends Controller
             foreach ($subpropositions as $sp) {
                 $subpropsByProp[$sp->proposition_id][] = [
                     'id'          => $sp->id,
+                    'indicators'  => $indicatorsBySubprop[$sp->id] ?? [],
                     'title'       => $sp->title,
                     'description' => $sp->description ?? '',
                     'proposition' => $sp->proposition_id,
-                    'indicators'  => $indicatorsBySubprop[$sp->id] ?? [],
-                    'created'     => $sp->created ? Carbon::parse($sp->created)->toJSON() : null,
-                    'updated'     => $sp->updated ? Carbon::parse($sp->updated)->toJSON() : null,
                 ];
             }
 
             $propTree = $propositions->map(function ($p) use ($subpropsByProp) {
                 return [
                     'id'              => $p->id,
+                    'subpropositions' => $subpropsByProp[$p->id] ?? [],
                     'title'           => $p->title,
                     'description'     => $p->description ?? '',
                     'rubric'          => $p->rubric_id,
-                    'subpropositions' => $subpropsByProp[$p->id] ?? [],
-                    'created'         => $p->created ? Carbon::parse($p->created)->toJSON() : null,
-                    'updated'         => $p->updated ? Carbon::parse($p->updated)->toJSON() : null,
                 ];
             })->values();
 
-            $result = $this->formatRubric($rubric, $request->getSchemeAndHttpHost());
-            $result['propositions'] = $propTree;
-
-            return response()->json($result, 200);
+            return response()->json([
+                'id'                  => $rubric->id,
+                'propositions'        => $propTree,
+                'rating_scheme_title' => $rubric->rating_scheme_title,
+                'title'               => $rubric->title,
+                'description'         => $rubric->description ?? '',
+                'account'             => $rubric->account_id,
+                'rating_scheme'       => $rubric->rating_scheme_id,
+            ], 200);
         } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to retrieve rubric tree.',
@@ -453,19 +446,18 @@ class RubricController extends Controller
     {
         return [
             'id'                   => $rubric->id,
-            'title'                => $rubric->title,
-            'description'          => $rubric->description ?? '',
-            'rating_scheme'        => $rubric->rating_scheme_id,
+            'indicator_url'        => "{$schemeAndHost}/v1/indicators?rubric={$rubric->id}",
             'rating_scheme_title'  => $rubric->rating_scheme_title,
             'rating_scheme_code'   => $rubric->rating_scheme_code,
             'is_input_required'    => (bool) $rubric->is_input_required,
-            'account'              => $rubric->account_id,
-            'indicator_url'        => "{$schemeAndHost}/v1/indicators?rubric={$rubric->id}",
             'proposition_count'    => (int) ($rubric->proposition_count ?? 0),
             'subproposition_count' => (int) ($rubric->subproposition_count ?? 0),
             'indicator_count'      => (int) ($rubric->indicator_count ?? 0),
-            'created'              => $rubric->created ? Carbon::parse($rubric->created)->toJSON() : null,
             'updated'              => $rubric->updated ? Carbon::parse($rubric->updated)->toJSON() : null,
+            'title'                => $rubric->title,
+            'description'          => $rubric->description ?? '',
+            'account'              => $rubric->account_id,
+            'rating_scheme'        => $rubric->rating_scheme_id,
         ];
     }
 }
