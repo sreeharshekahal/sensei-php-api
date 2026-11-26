@@ -124,6 +124,103 @@ class ObservationReportController extends Controller
     }
 
     /**
+     * GET /groups/{groupId}/user-role-account/{uraId}/group-user-indicators
+     */
+    public function groupUserIndicators(Request $request, string $groupId, string $uraId)
+    {
+        if (!Str::isUuid($groupId) || !Str::isUuid($uraId)) {
+            return response()->json(['detail' => 'Not found.'], 404);
+        }
+
+        $group = DB::table('access_group')->where('id', $groupId)->first();
+        if (!$group) {
+            return response()->json(['detail' => 'Group not found.'], 404);
+        }
+
+        $member = DB::table('access_userroleaccount')->where('id', $uraId)->first();
+        if (!$member) {
+            return response()->json(['detail' => 'Member not found.'], 404);
+        }
+
+        try {
+            $query = DB::table('observations_indicatorrating as ir')
+                ->join('observations_evidence as e', 'ir.evidence_id', '=', 'e.id')
+                ->join('observations_observation as o', 'e.observation_id', '=', 'o.id')
+                ->join('rubrics_indicator as ind', 'ir.indicator_id', '=', 'ind.id')
+                ->join('rubrics_subproposition as sub', 'ind.subproposition_id', '=', 'sub.id')
+                ->join('rubrics_proposition as prop', 'sub.proposition_id', '=', 'prop.id')
+                ->join('observations_rating as rt', 'ir.rating_id', '=', 'rt.id')
+                ->where('o.group_id', $groupId)
+                ->where('o.observee_id', $uraId);
+
+            $this->applyDateFilter($query, 'o.created', $request);
+
+            $query->select([
+                'ind.id as indicator_id',
+                'ind.title as indicator_title',
+                'sub.id as subproposition_id',
+                'sub.title as subproposition_title',
+                'prop.id as proposition_id',
+                'prop.title as proposition_title',
+                DB::raw('COUNT(ir.id) as frequency'),
+                DB::raw('AVG(rt.score) as indicator_average'),
+            ])->groupBy('ind.id', 'ind.title', 'sub.id', 'sub.title', 'prop.id', 'prop.title');
+
+            $ordering = $request->query('ordering');
+            if ($ordering) {
+                $dir = str_starts_with($ordering, '-') ? 'desc' : 'asc';
+                $field = ltrim($ordering, '-');
+                if ($field === 'frequency') {
+                    $query->orderByRaw('COUNT(ir.id) ' . $dir);
+                } elseif ($field === 'indicator_average') {
+                    $query->orderByRaw('AVG(rt.score) ' . $dir);
+                } else {
+                    $query->orderBy('ind.title', 'asc');
+                }
+            } else {
+                $query->orderBy('ind.title', 'asc');
+            }
+
+            $allRows = $query->get();
+            $total = $allRows->count();
+
+            $pageSize = max(1, min((int) $request->query('page_size', $request->query('limit', 1000)), 1000));
+            $page = max(1, (int) $request->query('page', 1));
+            $offset = $request->filled('offset') ? max(0, (int) $request->query('offset')) : ($page - 1) * $pageSize;
+
+            $paged = $allRows->slice($offset, $pageSize)->map(fn ($row) => [
+                'indicator_id'         => $row->indicator_id,
+                'indicator_title'      => $row->indicator_title,
+                'subproposition_id'    => $row->subproposition_id,
+                'subproposition_title' => $row->subproposition_title,
+                'proposition_id'       => $row->proposition_id,
+                'proposition_title'    => $row->proposition_title,
+                'frequency'            => (int) $row->frequency,
+                'indicator_average'    => (float) $row->indicator_average,
+            ])->values();
+
+            $next = ($offset + $pageSize < $total)
+                ? $request->fullUrlWithQuery(['page' => $page + 1, 'page_size' => $pageSize])
+                : null;
+            $previous = ($page > 1 && $offset > 0)
+                ? $request->fullUrlWithQuery(['page' => $page - 1, 'page_size' => $pageSize])
+                : null;
+
+            return response()->json([
+                'count'    => $total,
+                'next'     => $next,
+                'previous' => $previous,
+                'results'  => $paged,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to retrieve group user indicators.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * GET /groups/{groupId}/member-observation-rating-reports
      */
     public function memberObservationRatingReports(Request $request, string $groupId)
