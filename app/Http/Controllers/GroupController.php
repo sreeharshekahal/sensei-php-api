@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 class GroupController extends Controller
@@ -101,6 +102,263 @@ class GroupController extends Controller
                 'details' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Create a new group (POST /groups/).
+     */
+    public function store(Request $request)
+    {
+        $ura = $this->getCurrentUserRoleAccount($request->user()->id);
+        if (!$ura) {
+            return response()->json(['detail' => 'User role account not found.'], 404);
+        }
+
+        $payload = $request->all();
+        if (!$request->has('rubric_id') && $request->has('rubric')) {
+            $payload['rubric_id'] = $request->input('rubric');
+        }
+        if (!$request->has('account_id') && $request->has('account')) {
+            $payload['account_id'] = $request->input('account');
+        }
+
+        $validator = Validator::make($payload, [
+            'title'       => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'rubric_id'   => 'nullable|uuid|exists:rubrics_rubric,id',
+            'account_id'  => 'nullable|uuid|exists:access_account,id',
+            'users'       => 'nullable|array',
+            'users.*'     => 'required|uuid|exists:access_userroleaccount,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors'  => $validator->errors(),
+            ], 400);
+        }
+
+        try {
+            $id = (string) Str::uuid();
+            $now = now();
+
+            DB::transaction(function () use ($id, $now, $payload, $ura) {
+                DB::table('access_group')->insert([
+                    'id'            => $id,
+                    'title'         => $payload['title'],
+                    'description'   => $payload['description'] ?? '',
+                    'rubric_id'     => $payload['rubric_id'] ?? null,
+                    'account_id'    => $payload['account_id'] ?? $ura->account_id,
+                    'created_by_id' => $ura->ura_id,
+                    'created'       => $now,
+                    'updated'       => $now,
+                ]);
+
+                $userIds = array_values(array_unique($payload['users'] ?? []));
+                if (!empty($userIds)) {
+                    $inserts = array_map(fn ($uraId) => [
+                        'group_id'           => $id,
+                        'userroleaccount_id' => $uraId,
+                    ], $userIds);
+                    DB::table('access_group_users')->insert($inserts);
+                }
+            });
+
+            $createdGroup = DB::table('access_group')->where('id', $id)->first();
+            $formatted = $this->formatGroupDetails(collect([$createdGroup]));
+
+            return response()->json($formatted[0], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to create group.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Update or partially update a group (PUT/PATCH /groups/{id}/).
+     */
+    public function update(Request $request, string $id)
+    {
+        if (empty($id) || !Str::isUuid($id)) {
+            return response()->json(['detail' => 'Not found.'], 404);
+        }
+
+        $ura = $this->getCurrentUserRoleAccount($request->user()->id);
+        if (!$ura) {
+            return response()->json(['detail' => 'User role account not found.'], 404);
+        }
+
+        $group = $this->findAccessibleGroup($id, $ura);
+        if (!$group) {
+            return response()->json(['detail' => 'Not found.'], 404);
+        }
+
+        $payload = $request->all();
+        if (!$request->has('rubric_id') && $request->has('rubric')) {
+            $payload['rubric_id'] = $request->input('rubric');
+        }
+
+        $isPut = $request->isMethod('put');
+        $validator = Validator::make($payload, [
+            'title'       => $isPut ? 'required|string|max:255' : 'sometimes|required|string|max:255',
+            'description' => 'sometimes|nullable|string',
+            'rubric_id'   => 'sometimes|nullable|uuid|exists:rubrics_rubric,id',
+            'users'       => 'sometimes|array',
+            'users.*'     => 'required|uuid|exists:access_userroleaccount,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors'  => $validator->errors(),
+            ], 400);
+        }
+
+        try {
+            DB::transaction(function () use ($id, $payload) {
+                $updateData = ['updated' => now()];
+
+                if (array_key_exists('title', $payload)) {
+                    $updateData['title'] = $payload['title'];
+                }
+                if (array_key_exists('description', $payload)) {
+                    $updateData['description'] = $payload['description'] ?? '';
+                }
+                if (array_key_exists('rubric_id', $payload)) {
+                    $updateData['rubric_id'] = $payload['rubric_id'];
+                }
+
+                DB::table('access_group')->where('id', $id)->update($updateData);
+
+                if (array_key_exists('users', $payload)) {
+                    DB::table('access_group_users')->where('group_id', $id)->delete();
+                    $userIds = array_values(array_unique($payload['users'] ?? []));
+                    if (!empty($userIds)) {
+                        $inserts = array_map(fn ($uraId) => [
+                            'group_id'           => $id,
+                            'userroleaccount_id' => $uraId,
+                        ], $userIds);
+                        DB::table('access_group_users')->insert($inserts);
+                    }
+                }
+            });
+
+            $updatedGroup = DB::table('access_group')->where('id', $id)->first();
+            $formatted = $this->formatGroupDetails(collect([$updatedGroup]));
+
+            return response()->json($formatted[0], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to update group.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a group (DELETE /groups/{id}/).
+     */
+    public function destroy(Request $request, string $id)
+    {
+        if (empty($id) || !Str::isUuid($id)) {
+            return response()->json(['detail' => 'Not found.'], 404);
+        }
+
+        $ura = $this->getCurrentUserRoleAccount($request->user()->id);
+        if (!$ura) {
+            return response()->json(['detail' => 'User role account not found.'], 404);
+        }
+
+        $group = $this->findAccessibleGroup($id, $ura);
+        if (!$group) {
+            return response()->json(['detail' => 'Not found.'], 404);
+        }
+
+        try {
+            DB::transaction(function () use ($id) {
+                DB::table('access_group_users')->where('group_id', $id)->delete();
+                DB::table('access_group')->where('id', $id)->delete();
+            });
+
+            return response()->json(null, 204);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to delete group.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk-delete groups (POST /groups/bulk_delete/).
+     */
+    public function bulkDelete(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'groups'   => 'required|array|min:1',
+            'groups.*' => 'required|uuid',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors'  => $validator->errors(),
+            ], 400);
+        }
+
+        $ura = $this->getCurrentUserRoleAccount($request->user()->id);
+        if (!$ura) {
+            return response()->json(['detail' => 'User role account not found.'], 404);
+        }
+
+        try {
+            $groupIds = $request->input('groups', []);
+
+            if ((int) $ura->rank !== 1) {
+                $groupIds = DB::table('access_group_users')
+                    ->where('userroleaccount_id', $ura->ura_id)
+                    ->whereIn('group_id', $groupIds)
+                    ->pluck('group_id')
+                    ->toArray();
+            }
+
+            if (!empty($groupIds)) {
+                DB::transaction(function () use ($groupIds) {
+                    DB::table('access_group_users')->whereIn('group_id', $groupIds)->delete();
+                    DB::table('access_group')->whereIn('id', $groupIds)->delete();
+                });
+            }
+
+            return response()->json(null, 204);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to bulk-delete groups.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function findAccessibleGroup(string $groupId, object $ura): ?object
+    {
+        $query = DB::table('access_group')->where('id', $groupId);
+
+        if ((int) $ura->rank !== 1) {
+            $isMember = DB::table('access_group_users')
+                ->where('group_id', $groupId)
+                ->where('userroleaccount_id', $ura->ura_id)
+                ->exists();
+
+            if (!$isMember) {
+                return null;
+            }
+        }
+
+        return $query->first();
     }
 
     /**
