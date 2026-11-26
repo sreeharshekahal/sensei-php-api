@@ -7,11 +7,13 @@ use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GroupController;
 use App\Http\Controllers\IndicatorController;
 use App\Http\Controllers\ObservationController;
+use App\Http\Controllers\ObservationReportController;
 use App\Http\Controllers\ObservationStatsController;
 use App\Http\Controllers\PropositionController;
 use App\Http\Controllers\RatingController;
 use App\Http\Controllers\RatingSchemeController;
 use App\Http\Controllers\RubricController;
+use App\Http\Controllers\SubpropositionController;
 use App\Http\Controllers\TagController;
 use App\Http\Controllers\UserRoleAccountController;
 use App\Http\Controllers\UserStatsController;
@@ -124,6 +126,14 @@ Route::middleware('auth.token')->group(function () {
     Route::patch('/propositions/{id}', [PropositionController::class, 'update']);
     Route::delete('/propositions/{id}', [PropositionController::class, 'destroy']);
 
+    // Subpropositions
+    Route::get('/subpropositions', [SubpropositionController::class, 'index']);
+    Route::post('/subpropositions', [SubpropositionController::class, 'store']);
+    Route::get('/subpropositions/{id}', [SubpropositionController::class, 'show']);
+    Route::put('/subpropositions/{id}', [SubpropositionController::class, 'update']);
+    Route::patch('/subpropositions/{id}', [SubpropositionController::class, 'update']);
+    Route::delete('/subpropositions/{id}', [SubpropositionController::class, 'destroy']);
+
     // Rubrics
     Route::get('/rubrics', [RubricController::class, 'index']);
     Route::post('/rubrics', [RubricController::class, 'store']);
@@ -140,4 +150,16 @@ Route::middleware('auth.token')->group(function () {
     Route::get('/groups/{groupId}/observation-stats/{uraId}', [ObservationStatsController::class, 'groupMemberStats']);
     Route::get('/groups/{groupId}/indicator-rating-charts/{uraId}', [ObservationStatsController::class, 'indicatorRatingCharts']);
     Route::post('/group-stats-pdf-report', [ObservationStatsController::class, 'groupStatsPdfReport']);
+
+    // Observation Reports & Advance Analytics
+    Route::get('/group-observation-activity-reports/{id}', [ObservationReportController::class, 'groupObservationActivityReport']);
+    Route::get('/group-observation-indicators-reports/{id}', [ObservationReportController::class, 'groupObservationIndicatorsReport']);
+    Route::get('/groups/{groupId}/member-observation-rating-reports', [ObservationReportController::class, 'memberObservationRatingReports']);
+    Route::get('/groups/{groupId}/member-observation-rating-reports/{uraId}', [ObservationReportController::class, 'memberObservationRatingReportDetail']);
+    Route::get('/groups/{groupId}/member-observation-indicators-reports/{uraId}', [ObservationReportController::class, 'memberObservationIndicatorsReport']);
+    Route::get('/groups/{groupId}/member-observation-activity-reports/{uraId}', [ObservationReportController::class, 'memberObservationActivityReport']);
+    Route::get('/groups/{groupId}/observation-advance-report/download_report', [ObservationReportController::class, 'downloadAdvanceReport']);
+    Route::get('/groups/{groupId}/observation-advance-report', [ObservationReportController::class, 'advanceReport']);
+    Route::get('/groups/{groupId}/advance-trends/{pk}/download_report', [ObservationReportController::class, 'downloadAdvanceTrends']);
+    Route::get('/groups/{groupId}/advance-trends/{pk}', [ObservationReportController::class, 'advanceTrends']);
 });
