@@ -46,6 +46,7 @@ class RatingSchemeController extends Controller
             $schemes = $query->select([
                     'id',
                     'title',
+                    'description',
                     'code',
                     'is_input_required',
                     'created',
@@ -83,6 +84,7 @@ class RatingSchemeController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'title'             => 'required|string|max:255',
+            'description'       => 'nullable|string',
             'code'              => 'required|string|max:100',
             'is_input_required' => 'nullable|boolean',
         ]);
@@ -102,6 +104,7 @@ class RatingSchemeController extends Controller
             DB::table('observations_ratingscheme')->insert([
                 'id'                => $id,
                 'title'             => $request->input('title'),
+                'description'       => $request->input('description') ?? '',
                 'code'              => $request->input('code'),
                 'is_input_required' => $request->boolean('is_input_required', false),
                 'created'           => $now,
@@ -132,7 +135,7 @@ class RatingSchemeController extends Controller
         try {
             $scheme = DB::table('observations_ratingscheme')
                 ->where('id', $id)
-                ->select(['id', 'title', 'code', 'is_input_required', 'created', 'updated'])
+                ->select(['id', 'title', 'description', 'code', 'is_input_required', 'created', 'updated'])
                 ->first();
 
             if (!$scheme) {
@@ -169,6 +172,7 @@ class RatingSchemeController extends Controller
         $isPut = $request->isMethod('put');
         $validator = Validator::make($request->all(), [
             'title'             => $isPut ? 'required|string|max:255' : 'sometimes|required|string|max:255',
+            'description'       => 'sometimes|nullable|string',
             'code'              => $isPut ? 'required|string|max:100' : 'sometimes|required|string|max:100',
             'is_input_required' => 'sometimes|boolean',
         ]);
@@ -186,6 +190,9 @@ class RatingSchemeController extends Controller
 
             if ($request->has('title')) {
                 $updateData['title'] = $request->input('title');
+            }
+            if ($request->has('description')) {
+                $updateData['description'] = $request->input('description') ?? '';
             }
             if ($request->has('code')) {
                 $updateData['code'] = $request->input('code');
@@ -244,11 +251,12 @@ class RatingSchemeController extends Controller
     {
         return [
             'id'                => $scheme->id,
-            'title'             => $scheme->title,
-            'code'              => $scheme->code,
-            'is_input_required' => (bool) $scheme->is_input_required,
             'created'           => $scheme->created ? Carbon::parse($scheme->created)->toJSON() : null,
             'updated'           => $scheme->updated ? Carbon::parse($scheme->updated)->toJSON() : null,
+            'title'             => $scheme->title,
+            'description'       => $scheme->description ?? '',
+            'code'              => $scheme->code,
+            'is_input_required' => (bool) $scheme->is_input_required,
         ];
     }
 }

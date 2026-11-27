@@ -172,5 +172,5 @@ Route::middleware('auth.token')->group(function () {
     Route::get('/groups/{groupId}/observation-advance-report/download_report', [ObservationReportController::class, 'downloadAdvanceReport']);
     Route::get('/groups/{groupId}/observation-advance-report', [ObservationReportController::class, 'advanceReport']);
     Route::get('/groups/{groupId}/advance-trends/{pk}/download_report', [ObservationReportController::class, 'downloadAdvanceTrends']);
-    Route::get('/groups/{groupId}/advance-trends/{pk}', [ObservationReportController::class, 'advanceTrends']);
+    Route::get('/groups/{groupId}/advance-trends/{levelId}', [ObservationReportController::class, 'advanceTrends']);
 });

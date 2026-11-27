@@ -478,11 +478,11 @@ class ObservationReportController extends Controller
     }
 
     /**
-     * GET /groups/{groupId}/advance-trends/{pk}
+     * GET /groups/{groupId}/advance-trends/{levelId}
      */
-    public function advanceTrends(Request $request, string $groupId, string $pk)
+    public function advanceTrends(Request $request, string $groupId, string $levelId)
     {
-        if (!Str::isUuid($groupId) || !Str::isUuid($pk)) {
+        if (!Str::isUuid($groupId) || !Str::isUuid($levelId)) {
             return response()->json(['detail' => 'Not found.'], 404);
         }
 
@@ -492,12 +492,12 @@ class ObservationReportController extends Controller
         }
 
         try {
-            $data = $this->computeAdvanceTrends($groupId, $pk, $request);
+            $data = $this->computeAdvanceTrends($groupId, $levelId, $request);
 
             return response()->json([
                 'group'       => ['id' => $group->id, 'title' => $group->title],
                 'level'       => $data['level'],
-                'level_value' => $pk,
+                'level_value' => $levelId,
                 'trends'      => $data['trends'],
             ], 200);
         } catch (\Exception $e) {
@@ -509,11 +509,11 @@ class ObservationReportController extends Controller
     }
 
     /**
-     * GET /groups/{groupId}/advance-trends/{pk}/download_report
+     * GET /groups/{groupId}/advance-trends/{levelId}/download_report
      */
-    public function downloadAdvanceTrends(Request $request, string $groupId, string $pk)
+    public function downloadAdvanceTrends(Request $request, string $groupId, string $levelId)
     {
-        if (!Str::isUuid($groupId) || !Str::isUuid($pk)) {
+        if (!Str::isUuid($groupId) || !Str::isUuid($levelId)) {
             return response()->json(['detail' => 'Not found.'], 404);
         }
 
@@ -523,10 +523,10 @@ class ObservationReportController extends Controller
         }
 
         try {
-            $data = $this->computeAdvanceTrends($groupId, $pk, $request);
+            $data = $this->computeAdvanceTrends($groupId, $levelId, $request);
             $lines = [
                 "Group: {$group->title}",
-                "Level: {$data['level']} ({$pk})",
+                "Level: {$data['level']} ({$levelId})",
                 "Generated: " . Carbon::now()->toDateTimeString(),
                 str_repeat('-', 70),
             ];
@@ -543,7 +543,7 @@ class ObservationReportController extends Controller
 
             return response($pdfBinary, 200, [
                 'Content-Type'        => 'application/pdf',
-                'Content-Disposition' => "attachment; filename=\"advance-trends-{$groupId}-{$pk}.pdf\"",
+                'Content-Disposition' => "attachment; filename=\"advance-trends-{$groupId}-{$levelId}.pdf\"",
             ]);
         } catch (\Exception $e) {
             return response()->json([
