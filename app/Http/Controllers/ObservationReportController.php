@@ -901,7 +901,7 @@ class ObservationReportController extends Controller
         ];
     }
 
-    private function computeAdvanceTrends(string $groupId, string $pk, Request $request): array
+    private function computeAdvanceTrends(string $groupId, string $levelId, Request $request): array
     {
         $level = $request->query('level', 'proposition');
         if (!in_array($level, ['proposition', 'subproposition', 'indicator'], true)) {
@@ -923,7 +923,7 @@ class ObservationReportController extends Controller
             ->join('observations_rating as rt', 'ir.rating_id', '=', 'rt.id')
             ->where('o.group_id', $groupId)
             ->where('o.is_published', true)
-            ->where($entityCol, $pk);
+            ->where($entityCol, $levelId);
 
         $this->applyDateFilter($query, 'o.created', $request);
 
